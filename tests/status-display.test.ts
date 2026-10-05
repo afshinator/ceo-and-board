@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { listPersistedRuns, renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
+import { listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -150,6 +150,27 @@ describe('runtime status display', () => {
 
       const runs = await listPersistedRuns(projectRoot);
       expect(runs.map((run) => run.sessionName)).toEqual([second.sessionName, first.sessionName]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the persisted CEO memo for a completed run', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-memo-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'memo-run',
+        briefContent: '# Brief\n\n## Situation\nRead memo',
+        boardMembers: ['Revenue'],
+      });
+
+      const memo = '# Board Memo\n\n## Final Decision\nProceed with the change.\n';
+      await writeFile(run.memoPath, memo, 'utf8');
+
+      const persistedMemo = await readPersistedMemo(projectRoot, run.sessionName);
+      expect(persistedMemo).toContain('## Final Decision');
+      expect(persistedMemo).toContain('Proceed with the change.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

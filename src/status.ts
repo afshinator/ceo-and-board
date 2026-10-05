@@ -140,6 +140,24 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
   }
 }
 
+export async function readPersistedMemo(projectRoot: string, sessionName?: string): Promise<string> {
+  const runs = await listPersistedRuns(projectRoot);
+  const selectedRun = sessionName
+    ? runs.find((run) => run.sessionName === sessionName) ?? runs[0]
+    : runs[0];
+
+  if (!selectedRun) {
+    throw new Error(`No persisted board runs found under ${join(projectRoot, '.pi', 'ceo-agents', 'deliberations')}.`);
+  }
+
+  const memoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', selectedRun.sessionName, 'memo.md');
+  try {
+    return await readFile(memoPath, 'utf8');
+  } catch {
+    throw new Error(`No memo file found for session "${selectedRun.sessionName}" at ${memoPath}.`);
+  }
+}
+
 export async function summarizePersistedRunStatus(
   projectRoot: string,
   sessionName?: string,
