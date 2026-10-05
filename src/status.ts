@@ -1,7 +1,8 @@
 import { cp, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
+import { resolveRunPaths } from './config.js';
 import { normalizeLifecycleState, type RunSession } from './run.js';
 
 export type BoardMemberStatusView = {
@@ -139,6 +140,7 @@ export type PersistedRunSummary = {
   sessionId: string;
   sessionName: string;
   sessionPath: string;
+  memoPath: string;
   lifecycle: string;
   createdAt: string;
   memberCount: number;
@@ -159,7 +161,7 @@ export function renderPersistedRunList(runs: PersistedRunSummary[]): string {
 }
 
 export async function listPersistedRuns(projectRoot: string): Promise<PersistedRunSummary[]> {
-  const deliberationsDir = join(projectRoot, '.pi', 'ceo-agents', 'deliberations');
+  const { deliberationsDir, memosDir } = await resolveRunPaths(projectRoot);
 
   try {
     const entries = await readdir(deliberationsDir, { withFileTypes: true });
@@ -178,10 +180,13 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
         const memberNames = Object.keys(board);
         const completedMembers = memberNames.filter((memberName) => board[memberName]?.status === 'COMPLETED').length;
         const failedMembers = memberNames.filter((memberName) => board[memberName]?.status === 'FAILED').length;
+        const sessionName = sessionJson.session_name ?? name;
+        const memoPath = typeof sessionJson.memo_path === 'string'
+          ? sessionJson.memo_path
+          : join(memosDir, sessionName, 'memo.md');
 
         let memoPreview: string | null = null;
         try {
-          const memoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionJson.session_name ?? name, 'memo.md');
           const memo = await readFile(memoPath, 'utf8');
           memoPreview = extractMemoPreview(memo);
         } catch {
@@ -190,8 +195,9 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
 
         summaries.push({
           sessionId: sessionJson.session_id ?? name,
-          sessionName: sessionJson.session_name ?? name,
+          sessionName,
           sessionPath,
+          memoPath,
           lifecycle: normalizeLifecycleState(
             typeof sessionJson.lifecycle_state === 'string'
               ? sessionJson.lifecycle_state
@@ -225,20 +231,20 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
 }
 
 export async function readPersistedMemo(projectRoot: string, sessionName?: string): Promise<string> {
+  const { deliberationsDir } = await resolveRunPaths(projectRoot);
   const runs = await listPersistedRuns(projectRoot);
   const selectedRun = sessionName
     ? runs.find((run) => run.sessionName === sessionName) ?? runs[0]
     : runs[0];
 
   if (!selectedRun) {
-    throw new Error(`No persisted board runs found under ${join(projectRoot, '.pi', 'ceo-agents', 'deliberations')}.`);
+    throw new Error(`No persisted board runs found under ${deliberationsDir}.`);
   }
 
-  const memoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', selectedRun.sessionName, 'memo.md');
   try {
-    return await readFile(memoPath, 'utf8');
+    return await readFile(selectedRun.memoPath, 'utf8');
   } catch {
-    throw new Error(`No memo file found for session "${selectedRun.sessionName}" at ${memoPath}.`);
+    throw new Error(`No memo file found for session "${selectedRun.sessionName}" at ${selectedRun.memoPath}.`);
   }
 }
 
@@ -259,7 +265,7 @@ export async function cleanupStalePersistedRuns(
 
     await rm(run.sessionPath, { recursive: true, force: true });
     try {
-      await rm(join(projectRoot, '.pi', 'ceo-agents', 'memos', run.sessionName), { recursive: true, force: true });
+      await rm(dirname(run.memoPath), { recursive: true, force: true });
     } catch {
       // The memo directory may not exist yet; ignore cleanup misses.
     }
@@ -282,9 +288,9 @@ export async function exportPersistedRunSnapshot(
   }
 
   await mkdir(destinationDir, { recursive: true });
-  const sourceSessionPath = join(run.sessionPath);
+  const sourceSessionPath = run.sessionPath;
   const sourceSnapshotDir = join(sourceSessionPath, 'snapshot');
-  const sourceMemoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionName, 'memo.md');
+  const sourceMemoPath = run.memoPath;
   const sessionJson = JSON.parse(await readFile(join(sourceSessionPath, 'session.json'), 'utf8')) as Record<string, any>;
 
   await writeFile(join(destinationDir, 'session.json'), `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
@@ -309,7 +315,7 @@ export async function summarizePersistedRunStatus(
   projectRoot: string,
   sessionName?: string,
 ): Promise<BoardStatusSummary> {
-  const deliberationsDir = join(projectRoot, '.pi', 'ceo-agents', 'deliberations');
+  const { deliberationsDir, memosDir } = await resolveRunPaths(projectRoot);
   const resolvedSessionName = sessionName ?? await (async () => {
     const entries = await readdir(deliberationsDir, { withFileTypes: true });
     const directoryNames = entries
@@ -339,8 +345,10 @@ export async function summarizePersistedRunStatus(
   const run: RunSession = {
     sessionId: sessionJson.session_id,
     sessionName: sessionJson.session_name,
-    sessionPath: sessionDir,
-    memoPath: join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionJson.session_name, 'memo.md'),
+    sessionPath: typeof sessionJson.session_path === 'string' ? sessionJson.session_path : sessionDir,
+    memoPath: typeof sessionJson.memo_path === 'string'
+      ? sessionJson.memo_path
+      : join(memosDir, sessionJson.session_name, 'memo.md'),
     lockPath: join(projectRoot, '.pi', 'ceo-agents', '.active-run.lock'),
     board: sessionJson.board ?? {},
     boardAgentPaths: sessionJson.board_agent_paths ?? {},

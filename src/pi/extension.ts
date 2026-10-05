@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionToolContext } from
 import { Type } from 'typebox';
 
 import { discoverBriefs, validateBrief } from '../briefs.js';
-import { loadConfig, resolveAgentPath } from '../config.js';
+import { findConfigFile, loadConfig, resolveAgentPath } from '../config.js';
 import { loadAgentDefinition } from '../agents.js';
 import { renderAgentPrompt } from '../prompt-renderer.js';
 import { BoardOrchestrator } from '../orchestrator.js';
@@ -32,19 +32,11 @@ function result(text: string, isError = false) {
 }
 
 async function findConfig(projectRoot: string): Promise<string> {
-  const candidates = [
-    join(projectRoot, 'ceo-and-board-configuration.yaml'),
-    join(projectRoot, '.pi', 'ceo-agents', 'ceo-and-board-configuration.yaml'),
-  ];
-  for (const path of candidates) {
-    try {
-      await access(path);
-      return path;
-    } catch {
-      continue;
-    }
+  const configPath = await findConfigFile(projectRoot);
+  if (!configPath) {
+    throw new Error(`No CEO–Board configuration found in ${projectRoot}.`);
   }
-  throw new Error(`No CEO–Board configuration found in ${projectRoot}.`);
+  return configPath;
 }
 
 async function findCeoAgentPath(projectRoot: string): Promise<string | undefined> {

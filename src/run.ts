@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
-import { loadConfig, resolveAgentPath } from './config.js';
+import { findConfigFile, loadConfig, resolveAgentPath, resolveRunPaths } from './config.js';
 import { loadAgentDefinition } from './agents.js';
 
 export interface LockOwnership {
@@ -150,7 +150,8 @@ async function recoverInterruptedRun(projectRoot: string, sessionName: string | 
     return;
   }
 
-  const sessionPath = join(projectRoot, ROOT_RUNTIME_DIR, 'deliberations', sessionName);
+  const { deliberationsDir } = await resolveRunPaths(projectRoot);
+  const sessionPath = join(deliberationsDir, sessionName);
   const sessionFile = join(sessionPath, 'session.json');
   const sessionJson = await readJsonIfExists<Record<string, any>>(sessionFile);
   if (!sessionJson || ['COMPLETED', 'FAILED'].includes(sessionJson.lifecycle_state)) {
@@ -185,10 +186,9 @@ export async function createRun(
   const briefSlug = slugify(options.briefName);
   const sessionName = `${briefSlug}-${sessionId}`;
 
-  const deliberationsDir = options.paths?.deliberations ?? join(ROOT_RUNTIME_DIR, 'deliberations');
-  const memosDir = options.paths?.memos ?? join(ROOT_RUNTIME_DIR, 'memos');
-  const sessionPath = join(projectRoot, deliberationsDir, sessionName);
-  const memoDir = join(projectRoot, memosDir, sessionName);
+  const { deliberationsDir, memosDir } = await resolveRunPaths(projectRoot, options.paths);
+  const sessionPath = join(deliberationsDir, sessionName);
+  const memoDir = join(memosDir, sessionName);
   const memoPath = join(memoDir, 'memo.md');
 
   await mkdir(join(sessionPath, 'snapshot'), { recursive: true });
@@ -221,6 +221,9 @@ export async function createRun(
   const checkpoint = {
     session_id: sessionId,
     session_name: sessionName,
+    project_root: projectRoot,
+    session_path: sessionPath,
+    memo_path: memoPath,
     brief: options.briefName,
     brief_content: options.briefContent,
     brief_description: options.briefContent.slice(0, 200).replace(/\s+/g, ' ').trim(),
@@ -286,14 +289,11 @@ export async function captureRunSnapshot(
     await writeFile(join(snapshotDir, 'brief.md'), briefContent, 'utf8');
   }
 
-  const projectRoot = join(run.sessionPath, '..', '..', '..', '..');
-  const configCandidates = [
-    join(projectRoot, 'ceo-and-board-configuration.yaml'),
-    join(projectRoot, 'sample implementation', 'ceo-and-board-configuration.yaml'),
-    join(projectRoot, '.pi', 'ceo-agents', 'ceo-and-board-configuration.yaml'),
-  ];
-
-  for (const configPath of configCandidates) {
+  const projectRoot = typeof sessionJson.project_root === 'string'
+    ? sessionJson.project_root
+    : join(run.sessionPath, '..', '..', '..', '..');
+  const configPath = await findConfigFile(projectRoot);
+  if (configPath) {
     try {
       await copyFile(configPath, join(snapshotDir, 'ceo-and-board-configuration.yaml'));
       const config = await loadConfig(configPath);

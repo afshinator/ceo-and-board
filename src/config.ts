@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { resolve as resolvePath } from 'node:path';
+import { access, readFile } from 'node:fs/promises';
+import { join, resolve as resolvePath } from 'node:path';
 
 import YAML from 'yaml';
 import { z } from 'zod';
@@ -101,4 +101,53 @@ export function resolveAgentPath(
   }
 
   return resolvePath(projectRoot, config.paths.agents, boardPath);
+}
+
+export const DEFAULT_RUNTIME_DIR = '.pi/ceo-agents';
+
+export interface ResolvedRunPaths {
+  briefsDir: string;
+  deliberationsDir: string;
+  memosDir: string;
+  agentsDir: string;
+}
+
+export async function findConfigFile(projectRoot: string): Promise<string | undefined> {
+  const candidates = [
+    join(projectRoot, 'ceo-and-board-configuration.yaml'),
+    join(projectRoot, DEFAULT_RUNTIME_DIR, 'ceo-and-board-configuration.yaml'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Keep looking for the next candidate.
+    }
+  }
+
+  return undefined;
+}
+
+export async function loadConfigIfPresent(projectRoot: string): Promise<CeoBoardConfig | undefined> {
+  const configPath = await findConfigFile(projectRoot);
+  if (!configPath) {
+    return undefined;
+  }
+  return loadConfig(configPath);
+}
+
+export async function resolveRunPaths(
+  projectRoot: string,
+  paths?: Partial<CeoBoardConfig['paths']>,
+): Promise<ResolvedRunPaths> {
+  const resolvedPaths = paths ?? (await loadConfigIfPresent(projectRoot))?.paths ?? {};
+
+  return {
+    briefsDir: resolvePath(projectRoot, resolvedPaths.briefs ?? join(DEFAULT_RUNTIME_DIR, 'briefs')),
+    deliberationsDir: resolvePath(projectRoot, resolvedPaths.deliberations ?? join(DEFAULT_RUNTIME_DIR, 'deliberations')),
+    memosDir: resolvePath(projectRoot, resolvedPaths.memos ?? join(DEFAULT_RUNTIME_DIR, 'memos')),
+    agentsDir: resolvePath(projectRoot, resolvedPaths.agents ?? join(DEFAULT_RUNTIME_DIR, 'agents')),
+  };
 }

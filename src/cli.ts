@@ -6,7 +6,7 @@ import { BoardOrchestrator } from './orchestrator.js';
 import { runBoardLifecycle } from './controller.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
-import { loadConfig } from './config.js';
+import { loadConfig, resolveRunPaths } from './config.js';
 import { exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
@@ -229,7 +229,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       : runs[0];
 
     if (!selectedRun) {
-      throw new Error(`No persisted board runs found under ${join(projectRoot, '.pi', 'ceo-agents', 'deliberations')}.`);
+      const { deliberationsDir } = await resolveRunPaths(projectRoot);
+      throw new Error(`No persisted board runs found under ${deliberationsDir}.`);
     }
 
     const exportDir = options.exportDir
