@@ -69,6 +69,7 @@ export interface RunSession {
   boardAgentPaths: Record<string, string>;
   boardModels: Record<string, string>;
   ceoModel?: string;
+  ceoAgentPath?: string;
 }
 
 const ROOT_RUNTIME_DIR = '.pi/ceo-agents';

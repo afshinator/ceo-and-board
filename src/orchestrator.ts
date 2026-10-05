@@ -7,6 +7,8 @@ import { evaluateMeetingConstraints } from './constraints.js';
 import { validateDecisionMemo } from './memo-validator.js';
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
 import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
+import { FINAL_STATEMENT_PROMPT, renderAgentPrompt } from './prompt-renderer.js';
+import { loadAgentDefinition } from './agents.js';
 
 export interface BoardTurnResult {
   runId: string;
@@ -69,11 +71,6 @@ export interface BoardOrchestratorOptions {
   autoRetry?: boolean;
   inactivityTimeoutMs?: number;
 }
-
-export const FINAL_STATEMENT_PROMPT = [
-  'Provide one final board position.',
-  'State your final position, strongest supporting reason, and strongest remaining concern or condition.',
-].join('\n');
 
 function recordToolUse(client: PiAgentClient, sessionPath: string): {
   dispose(): void;
@@ -376,6 +373,34 @@ export class BoardOrchestrator {
     }));
   }
 
+  private async renderCeoSynthesisPrompt(run: RunSession): Promise<string> {
+    const ceoPath = run.ceoAgentPath;
+    if (ceoPath) {
+      try {
+        const agent = await loadAgentDefinition(ceoPath);
+        const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+        const constraints = sessionJson.constraints ?? {};
+        return renderAgentPrompt(agent, {
+          sessionId: run.sessionId,
+          briefContent: typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '',
+          boardMembers: Object.keys(run.board),
+          memoPath: run.memoPath,
+          minTime: Number(constraints.min_time_minutes ?? 0),
+          maxTime: Number(constraints.max_time_minutes ?? 0),
+          minBudget: Number.parseFloat(String(constraints.min_budget ?? 0)) || 0,
+          maxBudget: Number.parseFloat(String(constraints.max_budget ?? 0)) || 0,
+          supportingFiles: [],
+          conversationPath: join(run.sessionPath, 'conversation.jsonl'),
+          expertise: [],
+          skills: [],
+        });
+      } catch {
+        // Fall back to the minimal framing when no CEO definition is available.
+      }
+    }
+    return 'You are the CEO consolidating the board discussion into one decision.';
+  }
+
   async synthesizeCEOConclusion(
     run: RunSession,
     turn: BoardTurnResult,
@@ -398,9 +423,10 @@ export class BoardOrchestrator {
       }
       return `${memberName}: ${turn.outputs[memberName] ?? 'No accepted statement recorded.'}`;
     });
+    const synthesisBasePrompt = await this.renderCeoSynthesisPrompt(run);
     const synthesisPrompt = [
       prompt,
-      prompt ? '' : 'You are the CEO consolidating the board discussion into one decision.',
+      prompt ? '' : synthesisBasePrompt,
       '',
       'Accepted final board statements:',
       ...synthesisInputs,

@@ -6,6 +6,8 @@ import { Type } from 'typebox';
 
 import { discoverBriefs, validateBrief } from '../briefs.js';
 import { loadConfig, resolveAgentPath } from '../config.js';
+import { loadAgentDefinition } from '../agents.js';
+import { renderAgentPrompt } from '../prompt-renderer.js';
 import { BoardOrchestrator } from '../orchestrator.js';
 import type { PiAgentClientFactory } from '../pi.js';
 import { acquireProjectLock, createRun, type ProjectLock, type RunSession } from '../run.js';
@@ -43,6 +45,22 @@ async function findConfig(projectRoot: string): Promise<string> {
     }
   }
   throw new Error(`No CEO–Board configuration found in ${projectRoot}.`);
+}
+
+async function findCeoAgentPath(projectRoot: string): Promise<string | undefined> {
+  const candidates = [
+    join(projectRoot, 'expertise', 'ceo.md'),
+    join(projectRoot, '.pi', 'ceo-agents', 'expertise', 'ceo.md'),
+  ];
+  for (const path of candidates) {
+    try {
+      await access(path);
+      return path;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 export function registerCeoBoardExtension(
@@ -116,18 +134,55 @@ export function registerCeoBoardExtension(
             constraints: config.meeting.constraints,
           });
           await lock.associateRun(run);
+          const ceoAgentPath = await findCeoAgentPath(projectRoot);
+          if (ceoAgentPath) {
+            run.ceoAgentPath = ceoAgentPath;
+            try {
+              const ceoAgent = await loadAgentDefinition(ceoAgentPath);
+              run.ceoModel = ceoAgent.frontmatter.model;
+            } catch {
+              // A CEO definition without valid frontmatter does not block framing.
+            }
+          }
           const orchestrator = new BoardOrchestrator(options.clientFactory, { autoRetry: true, cwd: projectRoot });
           activeDecision = { run, lock, orchestrator };
 
+          const constraints = config.meeting.constraints;
+          const numeric = (value: unknown) => Number.parseFloat(String(value)) || 0;
+          let framingBody: string;
+          if (run.ceoAgentPath) {
+            try {
+              const ceoAgent = await loadAgentDefinition(run.ceoAgentPath);
+              framingBody = renderAgentPrompt(ceoAgent, {
+                sessionId: run.sessionId,
+                briefContent,
+                boardMembers: config.board.map((member) => member.name),
+                memoPath: run.memoPath,
+                minTime: constraints.min_time_minutes,
+                maxTime: constraints.max_time_minutes,
+                minBudget: numeric(constraints.min_budget),
+                maxBudget: numeric(constraints.max_budget),
+                supportingFiles: brief.supportingFiles,
+                conversationPath: join(run.sessionPath, 'conversation.jsonl'),
+                expertise: [],
+                skills: [],
+              });
+            } catch {
+              framingBody = '';
+            }
+          } else {
+            framingBody = '';
+          }
           const framingRequest = [
-            `You are the CEO for decision session ${run.sessionName}.`,
+            framingBody || `You are the CEO for decision session ${run.sessionName}.`,
+            '',
             `Session ID: ${run.sessionId}`,
             `Brief: ${brief.name}`,
             `Board members: ${config.board.map((member) => member.name).join(', ')}`,
-            `Minimum time: ${config.meeting.constraints.min_time_minutes} minutes.`,
-            `Maximum time: ${config.meeting.constraints.max_time_minutes} minutes.`,
-            `Minimum budget (display only): ${config.meeting.constraints.min_budget}.`,
-            `Maximum budget: ${config.meeting.constraints.max_budget}.`,
+            `Minimum time: ${constraints.min_time_minutes} minutes.`,
+            `Maximum time: ${constraints.max_time_minutes} minutes.`,
+            `Minimum budget (display only): ${constraints.min_budget}.`,
+            `Maximum budget: ${constraints.max_budget}.`,
             '',
             'Review the complete brief, frame the decision, and use converse to consult the board. Continue deliberating until voluntary closing is eligible or a maximum forces closing. Then call end_deliberation.',
             '',
