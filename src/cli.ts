@@ -56,6 +56,7 @@ export async function runBoardFromBrief(
       briefContent: options.briefContent,
       boardMembers,
     });
+    await lock.associateRun(run);
 
     const orchestrator = new BoardOrchestrator(options.factory ?? undefined, {
       cwd: options.cwd ?? process.cwd(),

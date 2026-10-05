@@ -1,13 +1,34 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig } from './pi.js';
-import { captureRunSnapshot, type RunSession } from './run.js';
+import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWorkspace, type ArtifactSnapshot } from './artifacts/visibility.js';
+import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
+import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
 
 export interface BoardTurnResult {
   runId: string;
   outputs: Record<string, string | null>;
   memberResults: Record<string, BoardTurnMemberResult>;
+  participantStatuses?: Record<string, 'COMPLETED' | 'UNAVAILABLE'>;
+}
+
+export interface BoardRoundRequest {
+  to: 'all' | string | string[];
+  message: string;
+}
+
+export interface BoardRoundResult extends BoardTurnResult {
+  participantStatuses: Record<string, 'COMPLETED' | 'UNAVAILABLE'>;
+  responses: Array<{
+    member: string;
+    status: 'completed' | 'unavailable';
+    message?: string;
+  }>;
+  constraint: {
+    forced_close: boolean;
+    reason?: 'max_time' | 'max_budget';
+    voluntary_close_allowed: boolean;
+  };
 }
 
 export type BoardMemberExecutionStatus = 'COMPLETED' | 'FAILED';
@@ -21,6 +42,13 @@ export interface BoardTurnMemberResult {
   status: BoardMemberExecutionStatus;
   attempts: number;
   error: string | null;
+  usage?: BoardMemberUsageDelta;
+}
+
+export interface BoardMemberUsageDelta {
+  costDelta: number | null;
+  tokenDelta: NonNullable<PiSessionStats['tokens']> | null;
+  remainingContextTokens: number | null;
 }
 
 export interface BoardMemberTelemetry {
@@ -30,11 +58,227 @@ export interface BoardMemberTelemetry {
   last_output: string | null;
   last_error: string | null;
   last_updated: string;
+  usage: BoardMemberUsageDelta;
 }
 
 export interface BoardOrchestratorOptions {
   cwd?: string;
   autoRetry?: boolean;
+  inactivityTimeoutMs?: number;
+}
+
+function recordToolUse(client: PiAgentClient, sessionPath: string): {
+  dispose(): void;
+  flush(): Promise<void>;
+} {
+  let writes = Promise.resolve();
+  const dispose = client.onEvent((event) => {
+    if (event.type !== 'tool_execution_start' || typeof event.toolName !== 'string') {
+      return;
+    }
+
+    const record = {
+      agent: client.agentName,
+      timestamp: new Date().toISOString(),
+      tool_name: event.toolName,
+    };
+    writes = writes.then(() => appendJsonlRecord(join(sessionPath, 'tool-use.jsonl'), record));
+  });
+
+  return {
+    dispose,
+    async flush() {
+      await writes;
+    },
+  };
+}
+
+function calculateUsageDelta(before: PiSessionStats | undefined, after: PiSessionStats): BoardMemberUsageDelta {
+  const tokenDelta = before?.tokens && after.tokens
+    ? {
+        input: after.tokens.input - before.tokens.input,
+        output: after.tokens.output - before.tokens.output,
+        cacheRead: after.tokens.cacheRead - before.tokens.cacheRead,
+        cacheWrite: after.tokens.cacheWrite - before.tokens.cacheWrite,
+        total: after.tokens.total - before.tokens.total,
+      }
+    : null;
+  const contextUsage = after.contextUsage;
+
+  return {
+    costDelta: before?.cost !== undefined && after.cost !== undefined
+      ? after.cost - before.cost
+      : null,
+    tokenDelta,
+    remainingContextTokens: contextUsage && contextUsage.tokens !== null
+      ? contextUsage.contextWindow - contextUsage.tokens
+      : null,
+  };
+}
+
+async function readSessionStatsIfAvailable(client: PiAgentClient): Promise<PiSessionStats | undefined> {
+  try {
+    return await client.getSessionStats();
+  } catch {
+    return undefined;
+  }
+}
+
+async function readAcceptedConversation(sessionPath: string): Promise<string> {
+  let contents: string;
+  try {
+    contents = await readFile(join(sessionPath, 'conversation.jsonl'), 'utf8');
+  } catch {
+    return '';
+  }
+
+  const messages: string[] = [];
+  for (const line of contents.split('\n')) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      if (typeof record.from === 'string' && typeof record.message === 'string') {
+        messages.push(`${record.from} → ${typeof record.to === 'string' ? record.to : 'all'}:\n${record.message}`);
+      }
+    } catch {
+      // An incomplete trailing line is ignored; committed earlier messages remain usable.
+    }
+  }
+
+  return messages.join('\n\n');
+}
+
+async function withInactivityWatchdog<T>(
+  client: PiAgentClient,
+  timeoutMs: number,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let rejectOnTimeout: ((error: Error) => void) | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    rejectOnTimeout = reject;
+  });
+  const watchdog = new InactivityWatchdog({
+    timeoutMs,
+    onExpire: () => {
+      rejectOnTimeout?.(new Error(`Pi agent "${client.agentName}" exceeded the inactivity timeout.`));
+      void client.abort().catch(() => undefined);
+    },
+  });
+  const unsubscribe = client.onEvent((event) => {
+    if (event.type.startsWith('message_') || event.type.startsWith('tool_execution_')) {
+      watchdog.markActivity();
+    }
+  });
+
+  watchdog.start();
+  try {
+    return await Promise.race([operation(), timeout]);
+  } finally {
+    watchdog.stop();
+    unsubscribe();
+  }
+}
+
+async function executeBoardMember(
+  clientFactory: PiAgentClientFactory,
+  options: BoardOrchestratorOptions,
+  run: RunSession,
+  memberName: string,
+  promptText: string,
+): Promise<ExecutedBoardMember> {
+  const memberSlug = slugify(memberName);
+  const sessionId = `${run.sessionId}.${memberSlug}`;
+  const sessionDir = join(run.sessionPath, 'pi-sessions', memberSlug);
+  await mkdir(sessionDir, { recursive: true });
+  const workspacePath = await prepareMemberWorkspace(run.sessionPath, sessionDir);
+
+  const config: PiAgentStartConfig = {
+    agentName: memberName,
+    sessionId,
+    sessionDir,
+    cwd: workspacePath,
+    autoRetry: false,
+  };
+  const maxAttempts = options.autoRetry ? 2 : 1;
+  let lastError = 'The member did not complete.';
+
+  for (let attemptCount = 1; attemptCount <= maxAttempts; attemptCount += 1) {
+    let client: PiAgentClient | undefined;
+    let toolUseRecorder: ReturnType<typeof recordToolUse> | undefined;
+    let artifactBaseline: ArtifactSnapshot = new Map();
+
+    try {
+      artifactBaseline = await snapshotMemberWorkspace(workspacePath);
+      const attemptClient = await clientFactory.create(config);
+      client = attemptClient;
+      toolUseRecorder = recordToolUse(attemptClient, run.sessionPath);
+      await attemptClient.start(config);
+      await attemptClient.setAutoRetry(false);
+      const { statsBefore, statsAfter } = await withInactivityWatchdog(
+        attemptClient,
+        options.inactivityTimeoutMs ?? 90_000,
+        async () => {
+          const before = await readSessionStatsIfAvailable(attemptClient);
+          await attemptClient.prompt(promptText);
+          await attemptClient.waitUntilSettled();
+          const after = await readSessionStatsIfAvailable(attemptClient);
+          return { statsBefore: before, statsAfter: after };
+        },
+      );
+      await toolUseRecorder.flush();
+
+      return {
+        result: {
+          sessionId,
+          sessionDir,
+          prompt: promptText,
+          output: await attemptClient.getLastAssistantText(),
+          healthy: attemptClient.isHealthy(),
+          status: 'COMPLETED',
+          attempts: attemptCount,
+          error: null,
+          usage: statsAfter ? calculateUsageDelta(statsBefore, statsAfter) : {
+            costDelta: null,
+            tokenDelta: null,
+            remainingContextTokens: null,
+          },
+        },
+        workspacePath,
+        artifactBaseline,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      toolUseRecorder?.dispose();
+      await toolUseRecorder?.flush();
+      await client?.close().catch(() => undefined);
+    } finally {
+      toolUseRecorder?.dispose();
+    }
+  }
+
+  return {
+    result: {
+      sessionId,
+      sessionDir,
+      prompt: promptText,
+      output: null,
+      healthy: false,
+      status: 'FAILED',
+      attempts: maxAttempts,
+      error: lastError,
+    },
+    workspacePath,
+    artifactBaseline: new Map(),
+  };
+}
+
+interface ExecutedBoardMember {
+  result: BoardTurnMemberResult;
+  workspacePath: string;
+  artifactBaseline: ArtifactSnapshot;
 }
 
 function slugify(value: string): string {
@@ -105,6 +349,11 @@ export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, Board
         last_output: memberResult.output ?? null,
         last_error: memberResult.error ?? null,
         last_updated: new Date().toISOString(),
+        usage: memberResult.usage ?? {
+          costDelta: null,
+          tokenDelta: null,
+          remainingContextTokens: null,
+        },
       },
     ]),
   );
@@ -135,20 +384,31 @@ export class BoardOrchestrator {
       sessionId: `${run.sessionId}.ceo`,
       sessionDir: join(run.sessionPath, 'pi-sessions', 'ceo'),
       cwd: this.options.cwd ?? process.cwd(),
-      autoRetry: this.options.autoRetry ?? false,
+      autoRetry: false,
     };
 
     await captureRunSnapshot(run, { ceoPrompt: synthesisPrompt });
 
     const client = await this.clientFactory.create(config);
+    const toolUseRecorder = recordToolUse(client, run.sessionPath);
     try {
       await client.start(config);
-      await client.prompt(synthesisPrompt);
-      await client.waitUntilSettled();
+      await client.setAutoRetry(false);
+      await withInactivityWatchdog(
+        client,
+        this.options.inactivityTimeoutMs ?? 90_000,
+        async () => {
+          await client.prompt(synthesisPrompt);
+          await client.waitUntilSettled();
+        },
+      );
+      await toolUseRecorder.flush();
 
       const conclusion = await client.getLastAssistantText();
       return (conclusion ?? '').trim();
     } finally {
+      toolUseRecorder.dispose();
+      await toolUseRecorder.flush();
       await client.close().catch(() => undefined);
     }
   }
@@ -157,6 +417,126 @@ export class BoardOrchestrator {
     run: RunSession,
     promptsByMember: Record<string, string>,
   ): Promise<BoardTurnResult> {
+    return this.executeBoardTurn(run, promptsByMember, Object.keys(run.board));
+  }
+
+  async runBoardRound(run: RunSession, request: BoardRoundRequest): Promise<BoardRoundResult> {
+    if (!request.message.trim()) {
+      throw new Error('A CEO message is required for a board round.');
+    }
+
+    const configuredMembers = Object.keys(run.board);
+    const requestedMembers = request.to === 'all'
+      ? configuredMembers
+      : typeof request.to === 'string'
+        ? [request.to]
+        : [...new Set(request.to)];
+
+    if (requestedMembers.length === 0) {
+      throw new Error('At least one board member must be selected for a round.');
+    }
+
+    for (const memberName of requestedMembers) {
+      if (!Object.hasOwn(run.board, memberName)) {
+        throw new Error(`Unknown board member "${memberName}".`);
+      }
+    }
+
+    const sessionPath = join(run.sessionPath, 'session.json');
+    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const priorConversation = await readAcceptedConversation(run.sessionPath);
+    const participantStatuses: BoardTurnResult['participantStatuses'] = {};
+    const availableMembers: string[] = [];
+
+    for (const memberName of requestedMembers) {
+      if (sessionJson.board?.[memberName]?.status === 'UNAVAILABLE') {
+        participantStatuses[memberName] = 'UNAVAILABLE';
+      } else {
+        availableMembers.push(memberName);
+      }
+    }
+
+    sessionJson.status = 'RUNNING';
+    sessionJson.lifecycle_state = 'DELIBERATING';
+    sessionJson.round_state = 'IN_PROGRESS';
+    sessionJson.updated_at = new Date().toISOString();
+    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    const promptsByMember = Object.fromEntries(availableMembers.map((memberName) => [
+      memberName,
+      [
+        `You are ${memberName}.`,
+        '',
+        `Brief: ${sessionJson.brief ?? run.sessionName}`,
+        '',
+        typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '',
+        '',
+        'Prior shared conversation before this round:',
+        priorConversation || '(No prior deliberation messages.)',
+        '',
+        'Current CEO message:',
+        request.message,
+      ].join('\n'),
+    ]));
+
+    await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
+      from: 'CEO',
+      to: request.to,
+      message: request.message,
+    });
+
+    const turn = await this.executeBoardTurn(run, promptsByMember, availableMembers);
+    const combinedStatuses = { ...participantStatuses };
+    for (const memberName of availableMembers) {
+      const result = turn.memberResults[memberName];
+      combinedStatuses[memberName] = result.status === 'COMPLETED' ? 'COMPLETED' : 'UNAVAILABLE';
+      sessionJson.board[memberName] = {
+        ...(sessionJson.board[memberName] ?? {}),
+        status: combinedStatuses[memberName],
+        attempts: result.attempts,
+        last_output: result.status === 'COMPLETED' ? result.output : null,
+        last_error: result.error,
+        last_updated: new Date().toISOString(),
+      };
+    }
+
+    const latestSessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    latestSessionJson.board = sessionJson.board;
+    latestSessionJson.round = Number(latestSessionJson.round ?? 0) + 1;
+    latestSessionJson.round_state = 'IDLE';
+    latestSessionJson.updated_at = new Date().toISOString();
+    await writeFile(sessionPath, `${JSON.stringify(latestSessionJson, null, 2)}\n`, 'utf8');
+
+    const responses: BoardRoundResult['responses'] = requestedMembers.map((memberName) => {
+      const status: 'completed' | 'unavailable' = combinedStatuses[memberName] === 'COMPLETED' ? 'completed' : 'unavailable';
+      const message = turn.memberResults[memberName]?.output;
+      return status === 'completed' && message !== null && message !== undefined
+        ? { member: memberName, status, message }
+        : { member: memberName, status };
+    });
+    const forcedClose = latestSessionJson.forced_close ?? {};
+    const reason = forcedClose.reason === 'max_time' || forcedClose.reason === 'max_budget'
+      ? forcedClose.reason
+      : undefined;
+    const constraint = {
+      forced_close: Boolean(forcedClose.active),
+      ...(reason ? { reason } : {}),
+      voluntary_close_allowed: forcedClose.voluntary_close_allowed !== false,
+    };
+
+    return { ...turn, participantStatuses: combinedStatuses, responses, constraint };
+  }
+
+  private async executeBoardTurn(
+    run: RunSession,
+    promptsByMember: Record<string, string>,
+    memberNames: string[],
+  ): Promise<BoardTurnResult> {
+    for (const memberName of memberNames) {
+      if (!promptsByMember[memberName]) {
+        throw new Error(`No prompt configured for board member "${memberName}".`);
+      }
+    }
+
     const sessionPath = join(run.sessionPath, 'session.json');
     const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
     sessionJson.status = 'RUNNING';
@@ -165,79 +545,34 @@ export class BoardOrchestrator {
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
     await captureRunSnapshot(run, { promptsByMember });
 
-    const outputs: Record<string, string | null> = {};
-    const memberResults: Record<string, BoardTurnMemberResult> = {};
+    const executions = await Promise.all(memberNames.map((memberName) => executeBoardMember(
+      this.clientFactory,
+      this.options,
+      run,
+      memberName,
+      promptsByMember[memberName],
+    )));
+    const memberResults = Object.fromEntries(memberNames.map((memberName, index) => [memberName, executions[index]!.result])) as Record<string, BoardTurnMemberResult>;
+    const outputs = Object.fromEntries(memberNames.map((memberName) => [memberName, memberResults[memberName].output]));
+    const participantStatuses: BoardTurnResult['participantStatuses'] = {};
 
-    for (const memberName of Object.keys(run.board)) {
-      const promptText = promptsByMember[memberName];
-      if (!promptText) {
-        throw new Error(`No prompt configured for board member "${memberName}".`);
+    for (const execution of executions) {
+      if (execution.result.status === 'COMPLETED') {
+        await promoteMemberWorkspaceChanges(run.sessionPath, execution.workspacePath, execution.artifactBaseline);
       }
+    }
 
-      const memberSlug = slugify(memberName);
-      const sessionId = `${run.sessionId}.${memberSlug}`;
-      const sessionDir = join(run.sessionPath, 'pi-sessions', memberSlug);
-      await mkdir(sessionDir, { recursive: true });
-
-      const config: PiAgentStartConfig = {
-        agentName: memberName,
-        sessionId,
-        sessionDir,
-        cwd: this.options.cwd ?? process.cwd(),
-        autoRetry: this.options.autoRetry ?? false,
-      };
-
-      let client: PiAgentClient | undefined;
-      let attemptCount = 0;
-
-      while (attemptCount < 2) {
-        attemptCount += 1;
-
-        try {
-          client = await this.clientFactory.create(config);
-          await client.start(config);
-          await client.prompt(promptText);
-          await client.waitUntilSettled();
-
-          const finalText = await client.getLastAssistantText();
-          outputs[memberName] = finalText;
-          memberResults[memberName] = {
-            sessionId,
-            sessionDir,
-            prompt: promptText,
-            output: finalText,
-            healthy: client.isHealthy(),
-            status: 'COMPLETED',
-            attempts: attemptCount,
-            error: null,
-          };
-          break;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-
-          if (client) {
-            await client.close().catch(() => undefined);
-          }
-
-          if (attemptCount >= 2 || !this.options.autoRetry) {
-            throw new Error(`Board member "${memberName}" failed after ${attemptCount} attempt(s): ${message}`);
-          }
-
-          memberResults[memberName] = {
-            sessionId,
-            sessionDir,
-            prompt: promptText,
-            output: null,
-            healthy: false,
-            status: 'FAILED',
-            attempts: attemptCount,
-            error: message,
-          };
-        }
-      }
-
-      if (!memberResults[memberName]) {
-        throw new Error(`Board member "${memberName}" did not complete after retry.`);
+    for (const memberName of memberNames) {
+      const output = outputs[memberName];
+      if (memberResults[memberName].status === 'COMPLETED' && output !== null) {
+        participantStatuses[memberName] = 'COMPLETED';
+        await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
+          from: memberName,
+          to: 'all',
+          message: output,
+        });
+      } else {
+        participantStatuses[memberName] = 'UNAVAILABLE';
       }
     }
 
@@ -245,6 +580,7 @@ export class BoardOrchestrator {
       runId: run.sessionId,
       outputs,
       memberResults,
+      participantStatuses,
     };
   }
 
@@ -271,6 +607,12 @@ export class BoardOrchestrator {
       tracked.last_output = statement;
       tracked.last_updated = new Date().toISOString();
       sessionJson.board[memberName] = tracked;
+
+      await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
+        from: memberName,
+        to: 'all',
+        message: statement,
+      });
     }
 
     sessionJson.final_statements = finalStatements;
@@ -381,6 +723,19 @@ export class BoardOrchestrator {
         sessionJson.updated_at = new Date().toISOString();
         sessionJson.ceo_conclusion = finalConclusion;
         sessionJson.telemetry = buildBoardTelemetry(turn);
+
+        await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
+          from: 'CEO',
+          to: 'all',
+          message: finalConclusion,
+        });
+        await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
+          type: 'meeting_end',
+          timestamp: new Date().toISOString(),
+          elapsed_minutes: 0,
+          total_cost: 0,
+          end_reason: 'completed',
+        });
 
         await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
         return memo;

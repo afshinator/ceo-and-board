@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,30 @@ describe('run/session lifecycle', () => {
       expect(sessionJson.board).toHaveProperty('Revenue');
       expect(sessionJson.board).toHaveProperty('Contrarian');
       expect(run.memoPath).toContain(run.sessionName);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('creates shared conversation and tool-use logs with the run checkpoint', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-logs-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'log-review',
+        briefContent: '# Brief\n\n## Situation\nTest the logs.',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const conversationPath = join(run.sessionPath, 'conversation.jsonl');
+      const toolUsePath = join(run.sessionPath, 'tool-use.jsonl');
+
+      const conversation = await readFile(conversationPath, 'utf8');
+      const toolUse = await readFile(toolUsePath, 'utf8');
+
+      expect(conversation).toContain('meeting_start');
+      expect(conversation).toContain(run.sessionId);
+      expect(toolUse).toBe('');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -165,6 +189,53 @@ describe('run/session lifecycle', () => {
       await firstLock.release();
       const secondLock = await acquireProjectLock(projectRoot, { owner: 'ceo-board-test-2' });
       await secondLock.release();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a dead-owner lock, marks its run interrupted, and ignores incomplete JSONL tails', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-lock-recovery-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'interrupted-review',
+        briefContent: '# Brief\n\n## Situation\nRecover safely.',
+        boardMembers: ['Revenue'],
+      });
+      const conversationPath = join(run.sessionPath, 'conversation.jsonl');
+      const toolUsePath = join(run.sessionPath, 'tool-use.jsonl');
+      const initialConversation = await readFile(conversationPath, 'utf8');
+      const completeToolRecord = `${JSON.stringify({ agent: 'Revenue', timestamp: '2026-01-01T00:00:00.000Z', tool_name: 'read' })}\n`;
+      await writeFile(toolUsePath, completeToolRecord, 'utf8');
+      await appendFile(conversationPath, '{"from":"Revenue"', 'utf8');
+      await appendFile(toolUsePath, '{"agent":"Revenue"', 'utf8');
+
+      await writeFile(run.lockPath, `${JSON.stringify({
+        owner: 'previous-run',
+        pid: process.pid,
+        acquired_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        session_name: run.sessionName,
+      })}\n`, 'utf8');
+
+      await expect(acquireProjectLock(projectRoot, { owner: 'still-live' })).rejects.toThrow(/already held/i);
+
+      await writeFile(run.lockPath, `${JSON.stringify({
+        owner: 'previous-run',
+        pid: 2_147_483_647,
+        acquired_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        session_name: run.sessionName,
+      })}\n`, 'utf8');
+
+      const recoveredLock = await acquireProjectLock(projectRoot, { owner: 'recovery-owner' });
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+
+      expect(sessionJson.lifecycle_state).toBe('FAILED');
+      expect(sessionJson.status).toBe('FAILED');
+      expect(sessionJson.failure_reason).toBe('interrupted');
+      expect(await readFile(conversationPath, 'utf8')).toBe(initialConversation);
+      expect(await readFile(toolUsePath, 'utf8')).toBe(completeToolRecord);
+      await recoveredLock.release();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

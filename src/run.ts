@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { appendFile, copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 
 import { loadConfig, resolveAgentPath } from './config.js';
 
@@ -10,6 +10,7 @@ export interface LockOwnership {
 }
 
 export interface ProjectLock {
+  associateRun(run: RunSession): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -60,7 +61,6 @@ export interface RunSession {
 }
 
 const ROOT_RUNTIME_DIR = '.pi/ceo-agents';
-const LOCK_STALE_MS = 30 * 60 * 1000;
 
 function slugify(value: string): string {
   return value
@@ -99,6 +99,61 @@ async function ensureRuntimeDirectories(projectRoot: string): Promise<void> {
   await mkdir(join(projectRoot, ROOT_RUNTIME_DIR, 'memos'), { recursive: true });
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code !== 'ESRCH';
+  }
+}
+
+async function discardIncompleteJsonlTail(filePath: string): Promise<void> {
+  let contents: string;
+  try {
+    contents = await readFile(filePath, 'utf8');
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  if (contents.endsWith('\n')) {
+    return;
+  }
+
+  const lastCompleteLineEnd = contents.lastIndexOf('\n') + 1;
+  await writeFile(filePath, contents.slice(0, lastCompleteLineEnd), 'utf8');
+}
+
+async function recoverInterruptedRun(projectRoot: string, sessionName: string | undefined): Promise<void> {
+  if (!sessionName || basename(sessionName) !== sessionName) {
+    return;
+  }
+
+  const sessionPath = join(projectRoot, ROOT_RUNTIME_DIR, 'deliberations', sessionName);
+  const sessionFile = join(sessionPath, 'session.json');
+  const sessionJson = await readJsonIfExists<Record<string, any>>(sessionFile);
+  if (!sessionJson || ['COMPLETED', 'FAILED'].includes(sessionJson.lifecycle_state)) {
+    return;
+  }
+
+  await discardIncompleteJsonlTail(join(sessionPath, 'conversation.jsonl'));
+  await discardIncompleteJsonlTail(join(sessionPath, 'tool-use.jsonl'));
+  sessionJson.status = 'FAILED';
+  sessionJson.lifecycle_state = 'FAILED';
+  sessionJson.round_state = 'FAILED';
+  sessionJson.failure_reason = 'interrupted';
+  sessionJson.updated_at = new Date().toISOString();
+  await writeJsonAtomically(sessionFile, sessionJson);
+}
+
+export async function appendJsonlRecord(filePath: string, record: Record<string, unknown>): Promise<void> {
+  await mkdir(dirname(filePath), { recursive: true });
+  await appendFile(filePath, `${JSON.stringify(record)}\n`, 'utf8');
+}
+
 export async function createRun(
   projectRoot: string,
   options: CreateRunOptions,
@@ -132,6 +187,9 @@ export async function createRun(
     ]),
   );
 
+  const conversationPath = join(sessionPath, 'conversation.jsonl');
+  const toolUsePath = join(sessionPath, 'tool-use.jsonl');
+
   const checkpoint = {
     session_id: sessionId,
     session_name: sessionName,
@@ -153,6 +211,13 @@ export async function createRun(
   };
 
   await writeJsonAtomically(join(sessionPath, 'session.json'), checkpoint);
+  await writeFile(toolUsePath, '', 'utf8');
+  await appendJsonlRecord(conversationPath, {
+    type: 'meeting_start',
+    session_id: sessionId,
+    timestamp: new Date().toISOString(),
+    brief: options.briefName,
+  });
 
   return {
     sessionId,
@@ -284,40 +349,59 @@ export function evaluateConstraintState(
 
 export interface InactivityWatchdogOptions {
   timeoutMs?: number;
+  onExpire?: () => void;
 }
 
 export class InactivityWatchdog {
   private readonly timeoutMs: number;
+  private readonly onExpire?: () => void;
   private lastActivityAt: number;
+  private expired = false;
   private timer?: NodeJS.Timeout;
 
   constructor(options: InactivityWatchdogOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 90_000;
+    this.onExpire = options.onExpire;
     this.lastActivityAt = Date.now();
   }
 
   start(): void {
+    this.stop();
+    this.expired = false;
     this.lastActivityAt = Date.now();
-    this.timer = setInterval(() => {
-      if (this.isExpired()) {
-        this.stop();
-      }
-    }, Math.min(250, Math.max(50, this.timeoutMs / 2)));
+    this.scheduleExpiration();
   }
 
   markActivity(): void {
+    if (this.expired || !this.timer) {
+      return;
+    }
+
     this.lastActivityAt = Date.now();
+    this.scheduleExpiration();
   }
 
   isExpired(): boolean {
-    return Date.now() - this.lastActivityAt >= this.timeoutMs;
+    return this.expired || Date.now() - this.lastActivityAt >= this.timeoutMs;
   }
 
   stop(): void {
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = undefined;
     }
+  }
+
+  private scheduleExpiration(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+    }
+
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.expired = true;
+      this.onExpire?.();
+    }, this.timeoutMs);
   }
 }
 
@@ -382,6 +466,13 @@ export async function acquireProjectLock(
       await handle.close();
 
       return {
+        associateRun: async (run) => {
+          const currentLock = await readJsonIfExists<Record<string, unknown>>(lockPath);
+          if (!currentLock) {
+            throw new Error(`Project lock disappeared before run association at ${lockPath}.`);
+          }
+          await writeJsonAtomically(lockPath, { ...currentLock, session_name: run.sessionName });
+        },
         release: async () => {
           await rm(lockPath, { force: true });
         },
@@ -391,15 +482,13 @@ export async function acquireProjectLock(
         throw error;
       }
 
-      const lockContents = await readJsonIfExists<{ acquired_at?: string }>(lockPath);
-      if (!lockContents?.acquired_at) {
+      const lockContents = await readJsonIfExists<{ pid?: number; session_name?: string }>(lockPath);
+      if (!lockContents || typeof lockContents.pid !== 'number' || !Number.isInteger(lockContents.pid) || lockContents.pid <= 0) {
         throw new Error(`Project lock is active at ${lockPath}, but it is unreadable.`);
       }
 
-      const lockTimestamp = new Date(lockContents.acquired_at).getTime();
-      const ageMs = Date.now() - lockTimestamp;
-
-      if (ageMs > LOCK_STALE_MS) {
+      if (!isProcessAlive(lockContents.pid)) {
+        await recoverInterruptedRun(projectRoot, lockContents.session_name);
         await rm(lockPath, { force: true });
         continue;
       }

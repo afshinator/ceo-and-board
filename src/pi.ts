@@ -19,6 +19,19 @@ export interface PiSessionStats {
   pendingMessageCount: number;
   sessionId: string;
   isStreaming: boolean;
+  tokens?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost?: number;
+  contextUsage?: {
+    tokens: number | null;
+    contextWindow: number;
+    percent: number | null;
+  };
 }
 
 export interface PiAgentEvent {
@@ -57,12 +70,15 @@ export class RpcPiAgentClient implements PiAgentClient {
   private settled = false;
   private runtimeListenerAttached = false;
 
-  constructor(config: { agentName: string; piSessionId: string; cwd?: string; cliPath?: string }) {
+  constructor(config: { agentName: string; piSessionId: string; cwd?: string; cliPath?: string; sessionDir?: string }) {
     this.agentName = config.agentName;
     this.piSessionId = config.piSessionId;
     this.client = new RpcClient({
       cwd: config.cwd,
       cliPath: config.cliPath ?? DEFAULT_PI_CLI_PATH,
+      args: config.sessionDir
+        ? ['--session-id', config.piSessionId, '--session-dir', config.sessionDir]
+        : ['--session-id', config.piSessionId],
     });
   }
 
@@ -113,6 +129,9 @@ export class RpcPiAgentClient implements PiAgentClient {
       pendingMessageCount: 0,
       sessionId: this.piSessionId,
       isStreaming: false,
+      tokens: stats.tokens,
+      cost: stats.cost,
+      contextUsage: stats.contextUsage,
     };
   }
 
