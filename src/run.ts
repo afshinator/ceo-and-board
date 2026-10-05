@@ -17,6 +17,13 @@ export interface CreateRunOptions {
   boardMembers?: string[];
 }
 
+export type RunLifecycleState =
+  | 'INITIALIZING'
+  | 'DELIBERATING'
+  | 'CEO_SYNTHESIS'
+  | 'COMPLETED'
+  | 'FAILED';
+
 export interface RunSession {
   sessionId: string;
   sessionName: string;
@@ -105,6 +112,7 @@ export async function createRun(
     brief: options.briefName,
     brief_description: options.briefContent.slice(0, 200).replace(/\s+/g, ' ').trim(),
     status: 'READY',
+    lifecycle_state: 'INITIALIZING' as RunLifecycleState,
     round: 0,
     round_state: 'IDLE',
     forced_close: {

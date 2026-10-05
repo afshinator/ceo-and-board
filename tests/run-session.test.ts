@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { BoardOrchestrator } from '../src/orchestrator.js';
+import { ScriptedPiAgentClient } from '../src/pi.js';
 import { acquireProjectLock, createRun, type ProjectLock } from '../src/run.js';
 
 describe('run/session lifecycle', () => {
@@ -28,6 +30,46 @@ describe('run/session lifecycle', () => {
       expect(sessionJson.board).toHaveProperty('Revenue');
       expect(sessionJson.board).toHaveProperty('Contrarian');
       expect(run.memoPath).toContain(run.sessionName);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('tracks lifecycle state in the checkpoint during deliberation and synthesis', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-state-machine-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'risk-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+      });
+
+      const initialSession = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(initialSession.lifecycle_state).toBe('INITIALIZING');
+
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      const turn = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+      });
+
+      const midTurnSession = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(midTurnSession.lifecycle_state).toBe('DELIBERATING');
+      expect(turn.outputs.Revenue).toBe('The board should proceed with the offer.');
+
+      await orchestrator.writeCEOConclusion(run, turn, 'The board should proceed with the offer.');
+
+      const finalSession = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(finalSession.lifecycle_state).toBe('COMPLETED');
+      expect(finalSession.ceo_conclusion).toBe('The board should proceed with the offer.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
