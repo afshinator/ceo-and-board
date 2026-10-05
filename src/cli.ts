@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { BoardOrchestrator } from './orchestrator.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
+import { renderBoardStatus, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
   briefName: string;
@@ -87,11 +88,12 @@ export interface BoardRunCliOptions {
   autoRetry?: boolean;
 }
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult> {
-  const options: BoardRunCliOptions = {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string }> {
+  const options: BoardRunCliOptions & { status?: boolean; sessionName?: string } = {
     projectRoot: process.cwd(),
     boardMembers: [],
     autoRetry: true,
+    status: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -121,10 +123,28 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       continue;
     }
 
+    if (token === '--session-name') {
+      options.sessionName = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (token === '--status') {
+      options.status = true;
+      continue;
+    }
+
     if (token === '--no-auto-retry') {
       options.autoRetry = false;
       continue;
     }
+  }
+
+  if (options.status) {
+    const status = await summarizePersistedRunStatus(options.projectRoot ?? process.cwd(), options.sessionName);
+    const rendered = renderBoardStatus(status);
+    console.log(rendered);
+    return { lifecycle: status.lifecycle, rendered };
   }
 
   if (!options.briefName && options.briefPath) {

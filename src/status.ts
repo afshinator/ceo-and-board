@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
@@ -88,6 +88,71 @@ export async function summarizeBoardStatus(
     failedMembers,
     members,
   };
+}
+
+export async function summarizePersistedRunStatus(
+  projectRoot: string,
+  sessionName?: string,
+): Promise<BoardStatusSummary> {
+  const deliberationsDir = join(projectRoot, '.pi', 'ceo-agents', 'deliberations');
+  const resolvedSessionName = sessionName ?? await (async () => {
+    const entries = await readdir(deliberationsDir, { withFileTypes: true });
+    const directoryNames = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    if (directoryNames.length === 0) {
+      throw new Error(`No deliberation sessions found under ${deliberationsDir}.`);
+    }
+
+    return directoryNames[directoryNames.length - 1];
+  })();
+
+  const sessionDir = join(deliberationsDir, resolvedSessionName);
+  const sessionPath = join(sessionDir, 'session.json');
+  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+  const memberNames = Object.keys(sessionJson.board ?? {});
+  const outputs = Object.fromEntries(
+    memberNames.map((memberName) => {
+      const tracked = sessionJson.board[memberName] ?? {};
+      return [memberName, tracked.last_output ?? null];
+    }),
+  );
+
+  const run: RunSession = {
+    sessionId: sessionJson.session_id,
+    sessionName: sessionJson.session_name,
+    sessionPath: sessionDir,
+    memoPath: join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionJson.session_name, 'memo.md'),
+    lockPath: join(projectRoot, '.pi', 'ceo-agents', '.active-run.lock'),
+    board: sessionJson.board ?? {},
+  };
+
+  const memberResults = Object.fromEntries(
+    memberNames.map((memberName) => {
+      const tracked = sessionJson.board[memberName] ?? {};
+      const status: 'COMPLETED' | 'FAILED' = tracked.status === 'FAILED' ? 'FAILED' : 'COMPLETED';
+
+      return [memberName, {
+        sessionId: sessionJson.session_id,
+        sessionDir,
+        prompt: tracked.prompt ?? '',
+        output: tracked.last_output ?? null,
+        healthy: status !== 'FAILED',
+        status,
+        attempts: Number(tracked.attempts ?? 0),
+        error: tracked.last_error ?? null,
+      }];
+    }),
+  );
+
+  return summarizeBoardStatus(run, {
+    runId: sessionJson.session_id,
+    outputs,
+    memberResults,
+  });
 }
 
 export function renderBoardStatus(status: BoardStatusSummary): string {

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { renderBoardStatus, summarizeBoardStatus } from '../src/status.js';
+import { renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -85,6 +85,48 @@ describe('runtime status display', () => {
 
       expect(status.lifecycle).toBe('FINAL_CLOSING');
       expect(renderBoardStatus(status)).toContain('FINAL_CLOSING');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('summarizes a persisted run directory from the checkpoint itself', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-persisted-status-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'persisted-status',
+        briefContent: '# Brief\n\n## Situation\nCheck current status',
+        boardMembers: ['Eng', 'Ops'],
+      });
+
+      const sessionPath = join(run.sessionPath, 'session.json');
+      const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      sessionJson.lifecycle_state = 'CEO_FRAMING';
+      sessionJson.status = 'RUNNING';
+      sessionJson.board = {
+        Eng: {
+          status: 'COMPLETED',
+          attempts: 1,
+          last_output: 'Ship the minimal route.',
+          last_error: null,
+          last_updated: new Date().toISOString(),
+        },
+        Ops: {
+          status: 'FAILED',
+          attempts: 2,
+          last_output: null,
+          last_error: 'Timed out.',
+          last_updated: new Date().toISOString(),
+        },
+      };
+      await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+
+      const persistedStatus = await summarizePersistedRunStatus(projectRoot, run.sessionName);
+      expect(persistedStatus.lifecycle).toBe('CEO_FRAMING');
+      expect(persistedStatus.completedMembers).toBe(1);
+      expect(persistedStatus.failedMembers).toBe(1);
+      expect(renderBoardStatus(persistedStatus)).toContain('CEO_FRAMING');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
