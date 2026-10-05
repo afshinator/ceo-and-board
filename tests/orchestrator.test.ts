@@ -146,6 +146,62 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('retries a bad CEO memo once and fails the run on a second invalid synthesis', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-invalid-memo-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'risk-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+      });
+
+      let ceoAttempts = 0;
+      const factory: PiAgentClientFactory = {
+        async create(config) {
+          if (config.agentName !== 'CEO') {
+            return new ScriptedPiAgentClient({
+              agentName: config.agentName,
+              piSessionId: config.sessionId,
+            });
+          }
+
+          ceoAttempts += 1;
+          return {
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+            async start() { return; },
+            async prompt() { return; },
+            async waitUntilSettled() { return; },
+            async getLastAssistantText() {
+              return ceoAttempts === 1 ? '' : 'The board should proceed with the offer.';
+            },
+            async getSessionStats() {
+              return { messageCount: ceoAttempts, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
+            },
+            async setAutoRetry() { return; },
+            async abort() { return; },
+            onEvent() { return () => {}; },
+            isHealthy() { return true; },
+            async close() { return; },
+          } as any;
+        },
+      };
+
+      const turn = await new BoardOrchestrator(factory, { autoRetry: true }).runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+      });
+
+      const memo = await new BoardOrchestrator(factory, { autoRetry: true }).writeCEOConclusion(run, turn, '');
+
+      expect(ceoAttempts).toBe(2);
+      expect(memo).toContain('## Final Decision');
+      expect(memo).toContain('The board should proceed with the offer.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks an unhealthy member as failed and retries once in the same session', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
 

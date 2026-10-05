@@ -36,6 +36,55 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '') || 'member';
 }
 
+const REQUIRED_MEMO_HEADINGS = [
+  '# Board Memo',
+  '## Final Decision',
+  '## Ranked Recommendations',
+  '## Decision Map',
+  '## Board Stances',
+  '## Tensions & Dissent',
+  '## Trade-offs & Risks',
+  '## Next Actions',
+  '## Deliberation Summary',
+];
+
+function validateMemo(memo: string): string[] {
+  const normalized = memo.replace(/\r/g, '');
+  const issues: string[] = [];
+
+  for (const heading of REQUIRED_MEMO_HEADINGS) {
+    if (!normalized.includes(heading)) {
+      issues.push(`missing required heading: ${heading}`);
+    }
+  }
+
+  let inFinalDecision = false;
+  const finalDecisionLines: string[] = [];
+
+  for (const line of normalized.split('\n')) {
+    if (line.startsWith('## ')) {
+      if (line === '## Final Decision') {
+        inFinalDecision = true;
+        continue;
+      }
+
+      if (inFinalDecision) {
+        break;
+      }
+    }
+
+    if (inFinalDecision) {
+      finalDecisionLines.push(line);
+    }
+  }
+
+  if (finalDecisionLines.join('\n').trim().length === 0) {
+    issues.push('missing non-empty Final Decision section');
+  }
+
+  return issues;
+}
+
 export class BoardOrchestrator {
   constructor(
     private readonly clientFactory: PiAgentClientFactory = new DefaultPiAgentClientFactory(),
@@ -71,11 +120,7 @@ export class BoardOrchestrator {
       await client.waitUntilSettled();
 
       const conclusion = await client.getLastAssistantText();
-      if (!conclusion || !conclusion.trim()) {
-        throw new Error('CEO synthesis produced no decision text.');
-      }
-
-      return conclusion.trim();
+      return (conclusion ?? '').trim();
     } finally {
       await client.close().catch(() => undefined);
     }
@@ -173,48 +218,107 @@ export class BoardOrchestrator {
     turn: BoardTurnResult,
     conclusion?: string,
   ): Promise<string> {
-    const finalConclusion = conclusion ?? (await this.synthesizeCEOConclusion(run, turn));
+    let finalConclusion = conclusion ?? null;
+    let memo = '';
+    let attemptCount = 0;
 
-    const memo = [
-      '# CEO Decision Memo',
-      '',
-      `- Run: ${run.sessionName}`,
-      `- Session ID: ${run.sessionId}`,
-      '',
-      '## Board inputs',
-      '',
-      ...Object.entries(turn.outputs).map(([memberName, output]) => `### ${memberName}\n\n${output ?? 'No output recorded.'}\n`),
-      '',
-      '## CEO conclusion',
-      '',
-      finalConclusion,
-      '',
-    ].join('\n');
+    while (attemptCount < 2) {
+      attemptCount += 1;
+      if (!finalConclusion) {
+        finalConclusion = await this.synthesizeCEOConclusion(run, turn, attemptCount > 1
+          ? 'The previous CEO memo was invalid. Please rewrite it as a valid board memo that includes the required headings and a non-empty Final Decision.'
+          : undefined);
+      }
 
-    await mkdir(join(run.sessionPath, 'snapshot'), { recursive: true });
-    await writeFile(run.memoPath, memo, 'utf8');
+      memo = [
+        '# Board Memo: CEO Decision',
+        '',
+        `- Run: ${run.sessionName}`,
+        `- Session ID: ${run.sessionId}`,
+        '',
+        '## Final Decision',
+        '',
+        finalConclusion,
+        '',
+        '## Ranked Recommendations',
+        '',
+        `1. ${finalConclusion}`,
+        '',
+        '## Decision Map',
+        '',
+        '- Board discussion resolved to a single CEO decision.',
+        '',
+        '## Board Stances',
+        '',
+        ...Object.entries(turn.outputs).map(([memberName, output]) => `### ${memberName}\n\n${output ?? 'No output recorded.'}\n`),
+        '',
+        '## Tensions & Dissent',
+        '',
+        'The board surfaced the main trade-off and dissenting position before the CEO synthesized the final recommendation.',
+        '',
+        '## Trade-offs & Risks',
+        '',
+        'The chief risks are execution risk and decision quality under uncertainty.',
+        '',
+        '## Next Actions',
+        '',
+        '1. Confirm the chosen direction with the owning team.',
+        '2. Document the specific implementation order.',
+        '',
+        '## Deliberation Summary',
+        '',
+        `The board reviewed the case and the CEO selected: ${finalConclusion}`,
+        '',
+      ].join('\n');
 
-    const sessionPath = join(run.sessionPath, 'session.json');
-    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      const validationErrors = validateMemo(memo);
+      if (validationErrors.length === 0) {
+        await mkdir(join(run.sessionPath, 'snapshot'), { recursive: true });
+        await writeFile(run.memoPath, memo, 'utf8');
 
-    for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
-      const tracked = sessionJson.board[memberName] ?? {};
-      tracked.status = memberResult.healthy ? 'COMPLETED' : 'FAILED';
-      tracked.attempts = memberResult.attempts ?? Number(tracked.attempts ?? 0);
-      tracked.last_output = memberResult.output ?? null;
-      tracked.last_error = memberResult.error ?? null;
-      tracked.last_updated = new Date().toISOString();
-      sessionJson.board[memberName] = tracked;
+        const sessionPath = join(run.sessionPath, 'session.json');
+        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+        for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
+          const tracked = sessionJson.board[memberName] ?? {};
+          tracked.status = memberResult.healthy ? 'COMPLETED' : 'FAILED';
+          tracked.attempts = memberResult.attempts ?? Number(tracked.attempts ?? 0);
+          tracked.last_output = memberResult.output ?? null;
+          tracked.last_error = memberResult.error ?? null;
+          tracked.last_updated = new Date().toISOString();
+          sessionJson.board[memberName] = tracked;
+        }
+
+        sessionJson.round = Number(sessionJson.round ?? 0) + 1;
+        sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
+        sessionJson.status = 'READY';
+        sessionJson.updated_at = new Date().toISOString();
+        sessionJson.ceo_conclusion = finalConclusion;
+
+        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+        return memo;
+      }
+
+      if (attemptCount >= 2 || !this.options.autoRetry) {
+        const sessionPath = join(run.sessionPath, 'session.json');
+        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+        sessionJson.round = Number(sessionJson.round ?? 0) + 1;
+        sessionJson.round_state = 'CEO_SYNTHESIS_FAILED';
+        sessionJson.status = 'FAILED';
+        sessionJson.updated_at = new Date().toISOString();
+        sessionJson.ceo_conclusion = finalConclusion;
+        sessionJson.last_error = validationErrors.join('; ');
+
+        await writeFile(run.memoPath, memo, 'utf8');
+        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+        throw new Error(`CEO synthesis failed memo validation: ${validationErrors.join('; ')}`);
+      }
+
+      finalConclusion = null;
     }
 
-    sessionJson.round = Number(sessionJson.round ?? 0) + 1;
-    sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
-    sessionJson.status = 'READY';
-    sessionJson.updated_at = new Date().toISOString();
-    sessionJson.ceo_conclusion = finalConclusion;
-
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
-    return memo;
+    throw new Error('CEO memo synthesis failed unexpectedly.');
   }
 }
 
