@@ -69,6 +69,7 @@ Notes:
 - The CEO synthesis step now goes through a dedicated CEO Pi session, synthesizes a conclusion from the board outputs, writes the final memo to the run output path, and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
 - The memo validator now treats a blank or structurally invalid `Final Decision` section as a synthesis failure and triggers the required single retry; a second invalid memo marks the run `FAILED` while preserving the accepted board statements.
 - The next implementation step is the end-deliberation and final-statement pipeline plus the UI status presentation layer from the v1.3 proposal, not a new runtime API gate.
+- The status/UI layer is now implemented as a small runtime summary module that renders member-level completion states and the active board lifecycle without re-deriving the state from raw logs.
 
 ## Verified accomplishments
 
@@ -88,7 +89,8 @@ Notes:
 - Added persisted board telemetry in `session.json` with `status`, `response_count`, `attempts`, and last-output/error snapshots for the current run state.
 - Added a dedicated CEO Pi session to synthesize the final conclusion from the board outputs, rather than accepting a raw, external conclusion value.
 - Added a deterministic memo validator that rejects blank or structurally invalid `Final Decision` sections and triggers the single allowed synthesis retry before failing the run.
-- Verified the orchestration, recovery, synthesis, and telemetry layer with dedicated tests and a clean TypeScript compile.
+- Added a board status summary renderer that exposes the live lifecycle and per-member completion states in a compact, UI-friendly report.
+- Verified the orchestration, recovery, synthesis, telemetry, and runtime-status layer with dedicated tests and a clean TypeScript compile.
 - Committed and pushed the verified work to origin successfully.
 
 ## Open items to track over time
