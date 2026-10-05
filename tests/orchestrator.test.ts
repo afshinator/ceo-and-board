@@ -139,6 +139,8 @@ describe('board orchestrator', () => {
       });
 
       expect(result.memberResults.Revenue.healthy).toBe(true);
+      expect(result.memberResults.Revenue.status).toBe('COMPLETED');
+      expect(result.memberResults.Revenue.attempts).toBe(2);
       expect(result.outputs.Revenue).toBe('The board should proceed with the offer.');
       expect(attempts).toBe(2);
     } finally {

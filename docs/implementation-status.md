@@ -62,6 +62,7 @@ Notes:
 - The config/agent/brief layer, run/session lock lifecycle, Pi adapter boundary, and board process orchestration are now coded and tested.
 - The project now includes a board orchestrator that runs each member in its own run-scoped Pi session and records the member outcome back into the session checkpoint.
 - The orchestrator now retries a failed member execution once in the same run-scoped Pi session when `autoRetry` is enabled, and records the final healthy or failed status in the checkpoint.
+- The board member result now exposes explicit `status`, `attempts`, and `error` metadata, making failure and retry visibility part of the runtime contract instead of an implicit side effect.
 - The CEO synthesis step writes the final memo to the run output path and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
 - The next implementation step is runtime polish and richer board-level execution semantics, not a new runtime API gate.
 
@@ -79,6 +80,7 @@ Notes:
 - Added a board orchestrator for member-scoped Pi sessions and board-turn execution.
 - Added the CEO synthesis memo step that writes the final deliberation result to the run memo path and persists member state in the run checkpoint.
 - Added a same-session retry path for a failed member execution when the orchestrator is configured to auto-retry.
+- Added explicit member execution metadata (`status`, `attempts`, `error`) so board runtime failures are visible in the orchestration result and saved checkpoint state.
 - Verified the orchestration, recovery, and telemetry layer with dedicated tests and a clean TypeScript compile.
 - Committed and pushed the verified work to origin successfully.
 

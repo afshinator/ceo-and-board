@@ -10,12 +10,17 @@ export interface BoardTurnResult {
   memberResults: Record<string, BoardTurnMemberResult>;
 }
 
+export type BoardMemberExecutionStatus = 'COMPLETED' | 'FAILED';
+
 export interface BoardTurnMemberResult {
   sessionId: string;
   sessionDir: string;
   prompt: string;
   output: string | null;
   healthy: boolean;
+  status: BoardMemberExecutionStatus;
+  attempts: number;
+  error: string | null;
 }
 
 export interface BoardOrchestratorOptions {
@@ -83,16 +88,32 @@ export class BoardOrchestrator {
             prompt: promptText,
             output: finalText,
             healthy: client.isHealthy(),
+            status: 'COMPLETED',
+            attempts: attemptCount,
+            error: null,
           };
           break;
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+
           if (client) {
             await client.close().catch(() => undefined);
           }
 
           if (attemptCount >= 2 || !this.options.autoRetry) {
-            throw error;
+            throw new Error(`Board member "${memberName}" failed after ${attemptCount} attempt(s): ${message}`);
           }
+
+          memberResults[memberName] = {
+            sessionId,
+            sessionDir,
+            prompt: promptText,
+            output: null,
+            healthy: false,
+            status: 'FAILED',
+            attempts: attemptCount,
+            error: message,
+          };
         }
       }
 
@@ -138,7 +159,9 @@ export class BoardOrchestrator {
     for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
       const tracked = sessionJson.board[memberName] ?? {};
       tracked.status = memberResult.healthy ? 'COMPLETED' : 'FAILED';
+      tracked.attempts = memberResult.attempts ?? Number(tracked.attempts ?? 0);
       tracked.last_output = memberResult.output ?? null;
+      tracked.last_error = memberResult.error ?? null;
       tracked.last_updated = new Date().toISOString();
       sessionJson.board[memberName] = tracked;
     }
