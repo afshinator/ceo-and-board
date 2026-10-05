@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,9 +36,14 @@ describe.skipIf(!runRealPiSmoke)('real Pi RPC smoke', () => {
 
     try {
       const first = startClient();
+      const observedEvents: string[] = [];
+      const unsubscribe = first.onEvent((event) => observedEvents.push(event.type));
       await first.start(config);
       await first.setAutoRetry(false);
-      await first.prompt('Reply with exactly: CEO board smoke passed.');
+      await first.prompt([
+        `Use the write tool to create ${join(root, 'smoke-artifact.txt')} with exactly this text: Pi artifact smoke passed.`,
+        'After the write succeeds, reply with exactly: CEO board smoke passed.',
+      ].join('\n'));
       await first.waitUntilSettled();
       const firstResponse = await first.getLastAssistantText();
       const firstStats = await first.getSessionStats();
@@ -46,10 +51,13 @@ describe.skipIf(!runRealPiSmoke)('real Pi RPC smoke', () => {
       await first.waitUntilSettled();
       const secondResponse = await first.getLastAssistantText();
       const secondStats = await first.getSessionStats();
+      unsubscribe();
       await first.close();
 
       expect(firstResponse?.trim()).toContain('CEO board smoke passed.');
       expect(secondResponse?.trim()).toContain('second turn persisted.');
+      expect(observedEvents).toContain('tool_execution_start');
+      expect(await readFile(join(root, 'smoke-artifact.txt'), 'utf8')).toBe('Pi artifact smoke passed.');
       expect(secondStats.sessionId).toBe(sessionId);
       expect(secondStats.messageCount).toBeGreaterThan(firstStats.messageCount);
 
