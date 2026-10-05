@@ -26,6 +26,12 @@ export interface CreateRunOptions {
     min_budget: number;
     max_budget: number;
   };
+  paths?: {
+    briefs: string;
+    deliberations: string;
+    memos: string;
+    agents: string;
+  };
 }
 
 export type ForcedCloseReason = 'max_time' | 'max_budget';
@@ -179,8 +185,10 @@ export async function createRun(
   const briefSlug = slugify(options.briefName);
   const sessionName = `${briefSlug}-${sessionId}`;
 
-  const sessionPath = join(projectRoot, ROOT_RUNTIME_DIR, 'deliberations', sessionName);
-  const memoDir = join(projectRoot, ROOT_RUNTIME_DIR, 'memos', sessionName);
+  const deliberationsDir = options.paths?.deliberations ?? join(ROOT_RUNTIME_DIR, 'deliberations');
+  const memosDir = options.paths?.memos ?? join(ROOT_RUNTIME_DIR, 'memos');
+  const sessionPath = join(projectRoot, deliberationsDir, sessionName);
+  const memoDir = join(projectRoot, memosDir, sessionName);
   const memoPath = join(memoDir, 'memo.md');
 
   await mkdir(join(sessionPath, 'snapshot'), { recursive: true });

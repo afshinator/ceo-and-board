@@ -132,6 +132,7 @@ export function registerCeoBoardExtension(
               resolveAgentPath(member.path, config, projectRoot),
             ])),
             constraints: config.meeting.constraints,
+            paths: config.paths,
           });
           await lock.associateRun(run);
           const ceoAgentPath = await findCeoAgentPath(projectRoot);

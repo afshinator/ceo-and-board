@@ -164,7 +164,8 @@ The [implementation-1.4](implementation-1.4.md) corrective plan is in execution.
 - B4 complete: [src/prompt-renderer.ts](../src/prompt-renderer.ts) implements `renderAgentPrompt` with the recovered `{{VARIABLE}}` form, rejects unknown variables, and centralizes `FINAL_STATEMENT_PROMPT`. CEO framing and synthesis prompts render from the CEO agent definition (with minimal fallback), and the extension stores `ceoAgentPath`/`ceoModel` on the run. N4 green; A12 smoke re-run passed (31.4s).
 - B5 complete: budgets are numeric-only (Zod 4 `finite().nonnegative()`), `min_time > max_time` and `min_budget > max_budget` rejected via `.check`, empty board and duplicate member names rejected. Sample config and fixtures converted to numeric budgets; the sample's string-union accommodation is removed. N1 green. Recorded decision D2 stands: currency display is presentation-layer.
 - B6 complete: the brief validator rejects duplicate required sections (N3), and supporting sibling file contents are read and appended to the CEO framing request under a Supporting Context block. N3 green; sibling-content flow covered by a new extension test.
-- Conformance checklist status after B6: C1–C7 pass; C8–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
+- B7 complete: `CreateRunOptions.paths` drives deliberation/memo directories; the Pi extension passes `config.paths`, and the `.pi/ceo-agents` constant is now only the default. N5 green.
+- Conformance checklist status after B7: C1–C8 pass; C9–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
 
 ## Decision log
 

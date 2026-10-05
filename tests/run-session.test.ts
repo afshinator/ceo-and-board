@@ -66,7 +66,7 @@ describe('run/session lifecycle', () => {
         boardMembers: ['Revenue'],
         constraints: config.meeting.constraints,
         paths: config.paths,
-      } as Parameters<typeof createRun>[1]);
+      });
 
       expect(run.sessionPath).toBe(join(projectRoot, 'runs', 'deliberations', run.sessionName));
       expect(run.memoPath).toBe(join(projectRoot, 'runs', 'memos', run.sessionName, 'memo.md'));
