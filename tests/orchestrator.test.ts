@@ -171,24 +171,28 @@ describe('board orchestrator', () => {
         briefContent: '# Brief\n\n## Situation\nRoute a message.',
         boardMembers: ['Revenue', 'Contrarian', 'Ops'],
       });
-      const created: string[] = [];
+      const executed: string[] = [];
       const orchestrator = new BoardOrchestrator({
         async create(config) {
-          created.push(config.agentName);
-          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+          return new class extends ScriptedPiAgentClient {
+            async prompt(text: string) {
+              executed.push(config.agentName);
+              await super.prompt(text);
+            }
+          }({ agentName: config.agentName, piSessionId: config.sessionId });
         },
       });
 
       await orchestrator.runBoardRound(run, { to: 'all', message: 'First message.' });
-      expect([...created].sort()).toEqual(['Contrarian', 'Ops', 'Revenue']);
-      created.length = 0;
+      expect([...executed].sort()).toEqual(['Contrarian', 'Ops', 'Revenue']);
+      executed.length = 0;
 
       await orchestrator.runBoardRound(run, { to: 'Revenue', message: 'One member.' });
-      expect(created).toEqual(['Revenue']);
-      created.length = 0;
+      expect(executed).toEqual(['Revenue']);
+      executed.length = 0;
 
       await orchestrator.runBoardRound(run, { to: ['Revenue', 'Ops'], message: 'A subset.' });
-      expect([...created].sort()).toEqual(['Ops', 'Revenue']);
+      expect([...executed].sort()).toEqual(['Ops', 'Revenue']);
       const conversation = (await readFile(join(run.sessionPath, 'conversation.jsonl'), 'utf8'))
         .trim()
         .split('\n')
@@ -214,6 +218,7 @@ describe('board orchestrator', () => {
         boardMembers: ['Revenue', 'Contrarian'],
       });
       const created: string[] = [];
+      const executed: string[] = [];
       const orchestrator = new BoardOrchestrator({
         async create(config) {
           created.push(config.agentName);
@@ -235,7 +240,12 @@ describe('board orchestrator', () => {
               async close() { return; },
             };
           }
-          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+          return new class extends ScriptedPiAgentClient {
+            async prompt(text: string) {
+              executed.push(config.agentName);
+              await super.prompt(text);
+            }
+          }({ agentName: config.agentName, piSessionId: config.sessionId });
         },
       });
 
@@ -247,15 +257,20 @@ describe('board orchestrator', () => {
       ]);
       expect(firstRound.constraint).toEqual({ forced_close: false, voluntary_close_allowed: true });
       expect([...created].sort()).toEqual(['Contrarian', 'Revenue']);
+      expect([...executed].sort()).toEqual(['Contrarian']);
 
       created.length = 0;
+      executed.length = 0;
       const secondRound = await orchestrator.runBoardRound(run, { to: 'all', message: 'Round two.' });
-      expect(created).toEqual(['Contrarian']);
+      expect(created).toEqual([]);
+      expect(executed).toEqual(['Contrarian']);
       expect(secondRound.participantStatuses).toEqual({ Revenue: 'UNAVAILABLE', Contrarian: 'COMPLETED' });
 
       created.length = 0;
+      executed.length = 0;
       const explicitUnavailable = await orchestrator.runBoardRound(run, { to: 'Revenue', message: 'Check availability.' });
       expect(created).toEqual([]);
+      expect(executed).toEqual([]);
       expect(explicitUnavailable.participantStatuses).toEqual({ Revenue: 'UNAVAILABLE' });
       expect(explicitUnavailable.responses).toEqual([{ member: 'Revenue', status: 'unavailable' }]);
 

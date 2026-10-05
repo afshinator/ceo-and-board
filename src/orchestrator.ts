@@ -220,6 +220,7 @@ async function withInactivityWatchdog<T>(
 
 async function executeBoardMember(
   clientFactory: PiAgentClientFactory,
+  clientSessions: Map<string, PiAgentClient>,
   options: BoardOrchestratorOptions,
   run: RunSession,
   memberName: string,
@@ -248,11 +249,21 @@ async function executeBoardMember(
 
     try {
       artifactBaseline = await snapshotMemberWorkspace(workspacePath);
-      const attemptClient = await clientFactory.create(config);
-      client = attemptClient;
+      const cachedClient = clientSessions.get(sessionId);
+      if (cachedClient?.isHealthy()) {
+        client = cachedClient;
+      } else {
+        if (cachedClient) {
+          await cachedClient.close().catch(() => undefined);
+          clientSessions.delete(sessionId);
+        }
+        client = await clientFactory.create(config);
+        clientSessions.set(sessionId, client);
+        await client.start(config);
+        await client.setAutoRetry(false);
+      }
+      const attemptClient = client;
       toolUseRecorder = recordToolUse(attemptClient, run.sessionPath);
-      await attemptClient.start(config);
-      await attemptClient.setAutoRetry(false);
       const { statsBefore, statsAfter } = await withInactivityWatchdog(
         attemptClient,
         options.inactivityTimeoutMs ?? 90_000,
@@ -290,6 +301,7 @@ async function executeBoardMember(
       toolUseRecorder?.dispose();
       await toolUseRecorder?.flush();
       await client?.close().catch(() => undefined);
+      clientSessions.delete(sessionId);
     } finally {
       toolUseRecorder?.dispose();
     }
@@ -347,10 +359,21 @@ export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, Board
 }
 
 export class BoardOrchestrator {
+  private readonly memberClients = new Map<string, PiAgentClient>();
+
   constructor(
     private readonly clientFactory: PiAgentClientFactory = new DefaultPiAgentClientFactory(),
     private readonly options: BoardOrchestratorOptions = {},
   ) {}
+
+  async closeRun(run: RunSession): Promise<void> {
+    const sessionPrefix = `${run.sessionId}.`;
+    const clients = [...this.memberClients.entries()].filter(([sessionId]) => sessionId.startsWith(sessionPrefix));
+    await Promise.all(clients.map(async ([sessionId, client]) => {
+      this.memberClients.delete(sessionId);
+      await client.close().catch(() => undefined);
+    }));
+  }
 
   async synthesizeCEOConclusion(
     run: RunSession,
@@ -578,6 +601,7 @@ export class BoardOrchestrator {
 
     const executions = await Promise.all(memberNames.map((memberName) => executeBoardMember(
       this.clientFactory,
+      this.memberClients,
       this.options,
       run,
       memberName,
@@ -651,6 +675,7 @@ export class BoardOrchestrator {
 
       const execution = await executeBoardMember(
         this.clientFactory,
+        this.memberClients,
         { ...this.options, autoRetry: true },
         run,
         memberName,

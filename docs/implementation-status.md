@@ -79,7 +79,7 @@ Notes:
 - A11 now has a tested runtime view-model, centralized lifecycle/member labels, latest activity selection, accepted-response counts, unavailable telemetry rendering, and full-range time/budget progress. A persistent Pi widget adapter supports collapsed rows, selected-member expansion, keyboard navigation, updates/disposal, and non-TUI mode guarding.
 - Added `apps/ceo/extensions/ceo-and-board.ts` to mount the runtime widget only in TUI mode. It derives the view from the latest persisted run, polls state while mounted, clears when no run is available, and disposes the timer/widget on session shutdown.
 - The parent Pi extension now registers `/ceo-begin` plus CEO-callable `converse` and `end_deliberation` tools. Begin validates/selects a brief, acquires and associates the project lock, seeds the CEO parent turn with the full brief and constraints, streams round responses back to the CEO, then closes/synthesizes and releases the lock.
-- Board turns now launch member executions concurrently and resolve only after the round barrier; unavailable failures do not block successful participants, and only accepted outputs enter shared conversation history.
+- `BoardOrchestrator` now retains one healthy Pi client per member/session across deliberation rounds and final closing, replaces an unhealthy process against the same persisted session, and exposes `closeRun()` for terminal cleanup from the controller and parent extension.
 - The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `FINAL_CLOSING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
 - The runtime lifecycle is intentionally a simplified v1 model: broader conceptual v1.3 states such as `VALIDATING` and `CEO_FRAMING` are not currently represented as active persisted states in the implementation.
 - Added an `InactivityWatchdog` primitive and a `markForcedClose()` checkpoint update so the run persists timeout-driven and max-time/max-budget control state in a durable, observable form.
@@ -94,7 +94,6 @@ Notes:
 - The status/UI layer is now implemented as a small runtime summary module that renders member-level completion states and the active board lifecycle without re-deriving the state from raw logs.
 
 ## Verified accomplishments
-
 - Bootstrapped the Node + pnpm + TypeScript project.
 - Added a smoke test and a real preflight test suite.
 - Implemented config loading with Zod validation.
@@ -132,7 +131,8 @@ Notes:
 - Added A11 view-model and widget tests for centralized presentation, activity/response semantics, min/max progress and unclamped values, unavailable telemetry, keyboard selection/expansion, and non-interactive mode guarding.
 - Added host-adapter tests for reading latest checkpoint, conversation, tool activity, and unavailable telemetry into the Pi widget model, plus polling/empty-state/disposal behavior; typechecked the entrypoint against the installed ExtensionAPI.
 - Added a fake-Pi extension integration test covering `/ceo-begin`, brief validation, CEO framing injection, `converse`, `end_deliberation`, memo completion, and project-lock release.
-- Added the A12 opt-in real-Pi smoke harness: selects `CEO_BOARD_PI_MODEL`, requests and verifies a write-tool event/artifact, runs two turns, checks stats and response text, reopens the explicit session, verifies persisted history, and closes both RPC processes cleanly. Normal CI skips this test.
+- Added coverage proving board member Pi clients are reused across multiple CEO rounds and final closing, then closed once at run termination.
+- Added the A12 opt-in full-decision real-Pi smoke harness: selects `CEO_BOARD_PI_MODEL`, executes one board member through two rounds and final closing, verifies a write-tool event/artifact and validated CEO memo, checks session stats, reopens the same member session, and closes all RPC processes cleanly. Normal CI skips this test; it has not been run without explicit model opt-in.
 - The status summary now includes a compact memo preview extracted from the saved final-decision section, so the newest recommendation is visible in the run summary without opening the memo file itself.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
 - Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.
@@ -147,7 +147,7 @@ Notes:
 - Deeper UI/runtime status polish remains the next constructive phase if the team wants a more interactive board display beyond the compact summary layer.
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
-- Complete A5 verification against longer-lived real Pi processes; scripted failure/replacement and same-session subprocess startup are covered, but a full provider-backed crash/restart smoke test remains environment-dependent.
+- Complete real-process A5/A12 verification against a configured Pi model; deterministic coverage proves run-scoped client reuse, same-session replacement arguments, and terminal cleanup, but the provider-backed smoke remains environment-dependent.
 - The CLI controller still supports a supplied round-request sequence for deterministic runs. The credentialed A12 real-Pi smoke harness is implemented but has not been run in this environment.
 
 ## Decision log

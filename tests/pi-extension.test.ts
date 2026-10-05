@@ -48,6 +48,8 @@ describe('Pi CEO–Board extension', () => {
     const notifications: string[] = [];
     const statuses: string[] = [];
     const userMessages: string[] = [];
+    const clientCreations: Record<string, number> = {};
+    const clientCloses: Record<string, number> = {};
     const pi = {
       registerCommand(name: string, definition: any) { commands.set(name, definition); },
       registerTool(definition: any) { tools.set(definition.name, definition); },
@@ -62,7 +64,13 @@ describe('Pi CEO–Board extension', () => {
       registerCeoBoardExtension(pi, {
         clientFactory: {
           async create(config) {
-            return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+            clientCreations[config.agentName] = (clientCreations[config.agentName] ?? 0) + 1;
+            return new class extends ScriptedPiAgentClient {
+              async close() {
+                clientCloses[config.agentName] = (clientCloses[config.agentName] ?? 0) + 1;
+                await super.close();
+              }
+            }({ agentName: config.agentName, piSessionId: config.sessionId });
           },
         },
       });
@@ -89,12 +97,18 @@ describe('Pi CEO–Board extension', () => {
       expect(roundResult.isError).not.toBe(true);
       expect(JSON.parse(roundResult.content[0].text).responses).toHaveLength(2);
       expect(statuses.at(-1)).toContain('deliberating');
+      const secondRoundResult = await converse.execute('call-1b', { to: 'all', message: 'Address the board disagreement.' }, undefined, undefined, context);
+      expect(secondRoundResult.isError).not.toBe(true);
 
       const endResult = await tools.get('end_deliberation').execute('call-2', {}, undefined, undefined, context);
       expect(endResult.isError).not.toBe(true);
       const endPayload = JSON.parse(endResult.content[0].text) as { memo_path: string; memo: string };
       expect(endPayload.memo).toContain('## Final Decision');
       expect(await readFile(endPayload.memo_path, 'utf8')).toContain('session_id:');
+      expect(clientCreations.Revenue).toBe(1);
+      expect(clientCreations.Contrarian).toBe(1);
+      expect(clientCloses.Revenue).toBe(1);
+      expect(clientCloses.Contrarian).toBe(1);
       await expect(readFile(join(projectRoot, '.pi', 'ceo-agents', '.active-run.lock'), 'utf8'))
         .rejects.toMatchObject({ code: 'ENOENT' });
     } finally {

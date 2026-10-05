@@ -86,5 +86,7 @@ export async function runBoardLifecycle(
       }
     }
     throw error;
+  } finally {
+    await orchestrator.closeRun(run);
   }
 }

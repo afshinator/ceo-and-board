@@ -57,6 +57,7 @@ export function registerCeoBoardExtension(
     const active = activeDecision;
     activeDecision = undefined;
     if (active) {
+      await active.orchestrator.closeRun(active.run);
       await active.lock.release();
     }
   };
