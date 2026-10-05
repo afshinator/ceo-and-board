@@ -245,6 +245,36 @@ export class BoardOrchestrator {
     };
   }
 
+  async endDeliberation(
+    run: RunSession,
+    turn: BoardTurnResult,
+    finalStatementsByMember?: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const sessionPath = join(run.sessionPath, 'session.json');
+    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const finalStatements: Record<string, string> = {};
+
+    sessionJson.status = 'RUNNING';
+    sessionJson.lifecycle_state = 'FINAL_CLOSING';
+    sessionJson.round_state = 'FINAL_CLOSING';
+    sessionJson.updated_at = new Date().toISOString();
+
+    for (const memberName of Object.keys(run.board)) {
+      const statement = finalStatementsByMember?.[memberName] ?? turn.outputs[memberName] ?? `Final position: ${memberName} remains committed to the current recommendation.`;
+      finalStatements[memberName] = statement;
+
+      const tracked = sessionJson.board[memberName] ?? {};
+      tracked.status = 'COMPLETED';
+      tracked.last_output = statement;
+      tracked.last_updated = new Date().toISOString();
+      sessionJson.board[memberName] = tracked;
+    }
+
+    sessionJson.final_statements = finalStatements;
+    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    return finalStatements;
+  }
+
   async writeCEOConclusion(
     run: RunSession,
     turn: BoardTurnResult,

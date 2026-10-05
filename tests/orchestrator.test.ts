@@ -240,6 +240,44 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('collects final statements from each board member before synthesis', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-final-statements-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'closeout-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      const turn = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+        Contrarian: 'We should take the lower-risk path.',
+      });
+
+      const finalStatements = await orchestrator.endDeliberation(run, turn, {
+        Revenue: 'Final position: proceed.',
+        Contrarian: 'Final position: guardrail the risk.',
+      });
+
+      expect(finalStatements.Revenue).toContain('Final position: proceed.');
+      expect(finalStatements.Contrarian).toContain('Final position: guardrail the risk.');
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(sessionJson.lifecycle_state).toBe('FINAL_CLOSING');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks an unhealthy member as failed and retries once in the same session', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
 

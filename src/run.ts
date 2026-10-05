@@ -22,6 +22,7 @@ export type ForcedCloseReason = 'max_time' | 'max_budget';
 export type RunLifecycleState =
   | 'INITIALIZING'
   | 'DELIBERATING'
+  | 'FINAL_CLOSING'
   | 'CEO_SYNTHESIS'
   | 'COMPLETED'
   | 'FAILED';
