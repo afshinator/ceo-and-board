@@ -1,5 +1,8 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
-import type { RunSession } from './run.js';
+import { normalizeLifecycleState, type RunSession } from './run.js';
 
 export type BoardMemberStatusView = {
   name: string;
@@ -32,10 +35,26 @@ function compactText(value: string | null, maxLength = 180): string | null {
   return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-export function summarizeBoardStatus(
+async function readPersistedLifecycle(run: RunSession): Promise<string> {
+  try {
+    const sessionPath = join(run.sessionPath, 'session.json');
+    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, unknown>;
+    const lifecycle = typeof sessionJson.lifecycle_state === 'string'
+      ? sessionJson.lifecycle_state
+      : typeof sessionJson.status === 'string'
+        ? sessionJson.status
+        : 'DELIBERATING';
+
+    return normalizeLifecycleState(lifecycle);
+  } catch {
+    return 'DELIBERATING';
+  }
+}
+
+export async function summarizeBoardStatus(
   run: RunSession,
   turn: BoardTurnResult,
-): BoardStatusSummary {
+): Promise<BoardStatusSummary> {
   const memberNames = Object.keys(turn.memberResults).length > 0
     ? Object.keys(turn.memberResults)
     : Object.keys(run.board);
@@ -61,7 +80,7 @@ export function summarizeBoardStatus(
   const failedMembers = members.filter((member) => member.status === 'FAILED').length;
 
   return {
-    lifecycle: 'DELIBERATING',
+    lifecycle: await readPersistedLifecycle(run),
     runId: turn.runId,
     runName: run.sessionName,
     totalMembers: members.length,
