@@ -72,7 +72,7 @@ Notes:
 - The run state now persists per-member telemetry in `session.json`, including `status`, `response_count`, `attempts`, and `last_output`/`last_error` so the UI or runtime can render the live board state without reconstructing it from raw logs.
 - The CEO synthesis step now goes through a dedicated CEO Pi session, synthesizes a conclusion from the board outputs, writes the final memo to the run output path, and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
 - The memo validator now treats a blank or structurally invalid `Final Decision` section as a synthesis failure and triggers the required single retry; a second invalid memo marks the run `FAILED` while preserving the accepted board statements.
-- The next implementation step is the end-deliberation and final-statement pipeline plus the UI status presentation layer from the v1.3 proposal, not a new runtime API gate.
+- The final close-through-synthesis handoff is now implemented: final board statements are persisted before the CEO synthesis memo is generated, and lifecycle state normalization keeps the active runtime vocabulary aligned with the architecture even when older session files use the legacy naming.
 - The status/UI layer is now implemented as a small runtime summary module that renders member-level completion states and the active board lifecycle without re-deriving the state from raw logs.
 
 ## Verified accomplishments
@@ -104,6 +104,7 @@ Notes:
 - Validate real board execution against the pinned Pi runtime under longer-lived repeated runs.
 - Confirm member-level run scoping and private Pi session behavior during actual multi-member execution.
 - Add richer final memo formatting polish beyond the persisted board-state and retry baseline.
+- Deeper UI/runtime status polish remains the next constructive phase if the team wants a more interactive board display beyond the compact summary layer.
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
 
