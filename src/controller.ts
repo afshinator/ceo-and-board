@@ -6,7 +6,6 @@ import type { RunSession } from './run.js';
 
 export interface BoardLifecycleOptions {
   roundRequests: BoardRoundRequest[];
-  conclusion?: string;
 }
 
 export interface BoardLifecycleResult {
@@ -58,7 +57,7 @@ export async function runBoardLifecycle(
     }
 
     const finalStatements = await orchestrator.endDeliberation(run, lastTurn);
-    const memo = await orchestrator.writeCEOConclusion(run, lastTurn, options.conclusion);
+    const memo = await orchestrator.writeCEOConclusion(run, lastTurn);
     return {
       status: 'COMPLETED',
       rounds: completedRounds,

@@ -171,6 +171,43 @@ export class RpcPiAgentClient implements PiAgentClient {
   }
 }
 
+const SCRIPTED_CEO_MEMO_BODY = [
+  '## Final Decision',
+  '',
+  'The board should proceed with the offer.',
+  '',
+  '## Ranked Recommendations',
+  '',
+  '1. Accept the acquisition offer.',
+  '2. Keep the lower-risk path as a fallback.',
+  '',
+  '## Decision Map',
+  '',
+  '- Offer accepted; lower-risk path recorded as fallback.',
+  '',
+  '## Board Stances',
+  '',
+  '- Revenue supports the offer.',
+  '- Contrarian prefers the lower-risk path.',
+  '',
+  '## Tensions & Dissent',
+  '',
+  '- Revenue wants growth; Contrarian wants safety.',
+  '',
+  '## Trade-offs & Risks',
+  '',
+  '- Upside growth against execution risk.',
+  '',
+  '## Next Actions',
+  '',
+  '1. Confirm the direction with the owning team.',
+  '',
+  '## Deliberation Summary',
+  '',
+  'The board reviewed the case and chose the offer.',
+  '',
+].join('\n');
+
 export class ScriptedPiAgentClient implements PiAgentClient {
   readonly agentName: string;
   readonly piSessionId: string;
@@ -202,42 +239,7 @@ export class ScriptedPiAgentClient implements PiAgentClient {
     this.promptIndex += 1;
     const normalizedName = this.agentName.toLowerCase();
     const responseText = normalizedName === 'ceo'
-      ? [
-          '## Final Decision',
-          '',
-          'The board should proceed with the offer.',
-          '',
-          '## Ranked Recommendations',
-          '',
-          '1. Accept the acquisition offer.',
-          '2. Keep the lower-risk path as a fallback.',
-          '',
-          '## Decision Map',
-          '',
-          '- Offer accepted; lower-risk path recorded as fallback.',
-          '',
-          '## Board Stances',
-          '',
-          '- Revenue supports the offer.',
-          '- Contrarian prefers the lower-risk path.',
-          '',
-          '## Tensions & Dissent',
-          '',
-          '- Revenue wants growth; Contrarian wants safety.',
-          '',
-          '## Trade-offs & Risks',
-          '',
-          '- Upside growth against execution risk.',
-          '',
-          '## Next Actions',
-          '',
-          '1. Confirm the direction with the owning team.',
-          '',
-          '## Deliberation Summary',
-          '',
-          'The board reviewed the case and chose the offer.',
-          '',
-        ].join('\n')
+      ? SCRIPTED_CEO_MEMO_BODY
       : normalizedName.includes('revenue')
         ? 'The board should proceed with the offer.'
         : 'The final argument is to keep the lower-risk path.';

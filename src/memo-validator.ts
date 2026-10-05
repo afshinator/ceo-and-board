@@ -39,7 +39,7 @@ export interface MemoValidationResult {
   errors: string[];
 }
 
-const REQUIRED_SECTION_HEADINGS = [
+export const REQUIRED_SECTION_HEADINGS = [
   'Final Decision',
   'Ranked Recommendations',
   'Decision Map',

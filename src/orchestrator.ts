@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import YAML from 'yaml';
 import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWorkspace, type ArtifactSnapshot } from './artifacts/visibility.js';
 import { evaluateMeetingConstraints } from './constraints.js';
-import { validateDecisionMemo } from './memo-validator.js';
+import { REQUIRED_SECTION_HEADINGS, validateDecisionMemo } from './memo-validator.js';
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentEvent, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
 import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
 import { FINAL_STATEMENT_PROMPT, renderAgentPrompt } from './prompt-renderer.js';
@@ -513,14 +513,7 @@ export class BoardOrchestrator {
       ...synthesisInputs,
       '',
       'Provide the complete board memo body. Use exactly these Markdown H2 headings, once each, in this exact order:',
-      '## Final Decision',
-      '## Ranked Recommendations',
-      '## Decision Map',
-      '## Board Stances',
-      '## Tensions & Dissent',
-      '## Trade-offs & Risks',
-      '## Next Actions',
-      '## Deliberation Summary',
+      ...REQUIRED_SECTION_HEADINGS.map((heading) => `## ${heading}`),
       '',
       'Fill every section with content derived from the accepted final board statements above.',
       'Do not emit the "# Board Memo" H1 heading or any YAML frontmatter; the harness adds those.',
