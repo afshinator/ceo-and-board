@@ -92,4 +92,57 @@ describe('board orchestrator', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('marks an unhealthy member as failed and retries once in the same session', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'risk-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+      });
+
+      let attempts = 0;
+      const factory: PiAgentClientFactory = {
+        async create(config) {
+          attempts += 1;
+          if (attempts === 1) {
+            return {
+              agentName: config.agentName,
+              piSessionId: config.sessionId,
+              async start() {
+                throw new Error('member unhealthy');
+              },
+              async prompt() { return; },
+              async waitUntilSettled() { return; },
+              async getLastAssistantText() { return null; },
+              async getSessionStats() { return { messageCount: 0, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false }; },
+              async setAutoRetry() { return; },
+              async abort() { return; },
+              onEvent() { return () => {}; },
+              isHealthy() { return false; },
+              async close() { return; },
+            } as any;
+          }
+
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      };
+
+      const orchestrator = new BoardOrchestrator(factory, { autoRetry: true });
+      const result = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+      });
+
+      expect(result.memberResults.Revenue.healthy).toBe(true);
+      expect(result.outputs.Revenue).toBe('The board should proceed with the offer.');
+      expect(attempts).toBe(2);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

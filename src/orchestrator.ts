@@ -63,23 +63,41 @@ export class BoardOrchestrator {
         autoRetry: this.options.autoRetry ?? false,
       };
 
-      const client = await this.clientFactory.create(config);
-      try {
-        await client.start(config);
-        await client.prompt(promptText);
-        await client.waitUntilSettled();
+      let client: PiAgentClient | undefined;
+      let attemptCount = 0;
 
-        const finalText = await client.getLastAssistantText();
-        outputs[memberName] = finalText;
-        memberResults[memberName] = {
-          sessionId,
-          sessionDir,
-          prompt: promptText,
-          output: finalText,
-          healthy: client.isHealthy(),
-        };
-      } finally {
-        await client.close();
+      while (attemptCount < 2) {
+        attemptCount += 1;
+
+        try {
+          client = await this.clientFactory.create(config);
+          await client.start(config);
+          await client.prompt(promptText);
+          await client.waitUntilSettled();
+
+          const finalText = await client.getLastAssistantText();
+          outputs[memberName] = finalText;
+          memberResults[memberName] = {
+            sessionId,
+            sessionDir,
+            prompt: promptText,
+            output: finalText,
+            healthy: client.isHealthy(),
+          };
+          break;
+        } catch (error) {
+          if (client) {
+            await client.close().catch(() => undefined);
+          }
+
+          if (attemptCount >= 2 || !this.options.autoRetry) {
+            throw error;
+          }
+        }
+      }
+
+      if (!memberResults[memberName]) {
+        throw new Error(`Board member "${memberName}" did not complete after retry.`);
       }
     }
 
