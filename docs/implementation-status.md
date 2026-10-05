@@ -63,11 +63,12 @@ Notes:
 - The project now includes a board orchestrator that runs each member in its own run-scoped Pi session and records the member outcome back into the session checkpoint.
 - The orchestrator now retries a failed member execution once in the same run-scoped Pi session when `autoRetry` is enabled, and records the final healthy or failed status in the checkpoint.
 - The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
+- Added an `InactivityWatchdog` primitive and a `markForcedClose()` checkpoint update so the run persists timeout-driven and max-time/max-budget control state in a durable, observable form.
 - The board member result now exposes explicit `status`, `attempts`, and `error` metadata, making failure and retry visibility part of the runtime contract instead of an implicit side effect.
 - The run state now persists per-member telemetry in `session.json`, including `status`, `response_count`, `attempts`, and `last_output`/`last_error` so the UI or runtime can render the live board state without reconstructing it from raw logs.
 - The CEO synthesis step now goes through a dedicated CEO Pi session, synthesizes a conclusion from the board outputs, writes the final memo to the run output path, and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
 - The memo validator now treats a blank or structurally invalid `Final Decision` section as a synthesis failure and triggers the required single retry; a second invalid memo marks the run `FAILED` while preserving the accepted board statements.
-- The next implementation step is the full constraint/forced-close and inactivity-watchdog layer from the v1.3 proposal, not a new runtime API gate.
+- The next implementation step is the end-deliberation and final-statement pipeline plus the UI status presentation layer from the v1.3 proposal, not a new runtime API gate.
 
 ## Verified accomplishments
 

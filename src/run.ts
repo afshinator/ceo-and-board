@@ -17,6 +17,8 @@ export interface CreateRunOptions {
   boardMembers?: string[];
 }
 
+export type ForcedCloseReason = 'max_time' | 'max_budget';
+
 export type RunLifecycleState =
   | 'INITIALIZING'
   | 'DELIBERATING'
@@ -118,6 +120,7 @@ export async function createRun(
     forced_close: {
       active: false,
       reason: null,
+      voluntary_close_allowed: true,
     },
     board,
     created_at: new Date().toISOString(),
@@ -134,6 +137,63 @@ export async function createRun(
     lockPath: join(projectRoot, ROOT_RUNTIME_DIR, '.active-run.lock'),
     board,
   };
+}
+
+export interface InactivityWatchdogOptions {
+  timeoutMs?: number;
+}
+
+export class InactivityWatchdog {
+  private readonly timeoutMs: number;
+  private lastActivityAt: number;
+  private timer?: NodeJS.Timeout;
+
+  constructor(options: InactivityWatchdogOptions = {}) {
+    this.timeoutMs = options.timeoutMs ?? 90_000;
+    this.lastActivityAt = Date.now();
+  }
+
+  start(): void {
+    this.lastActivityAt = Date.now();
+    this.timer = setInterval(() => {
+      if (this.isExpired()) {
+        this.stop();
+      }
+    }, Math.min(250, Math.max(50, this.timeoutMs / 2)));
+  }
+
+  markActivity(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  isExpired(): boolean {
+    return Date.now() - this.lastActivityAt >= this.timeoutMs;
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+}
+
+export async function markForcedClose(
+  run: RunSession,
+  reason: ForcedCloseReason,
+): Promise<void> {
+  const sessionPath = join(run.sessionPath, 'session.json');
+  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+  sessionJson.round_state = 'FORCED_CLOSE_PENDING';
+  sessionJson.forced_close = {
+    active: true,
+    reason,
+    voluntary_close_allowed: false,
+  };
+  sessionJson.updated_at = new Date().toISOString();
+
+  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
 }
 
 export async function acquireProjectLock(

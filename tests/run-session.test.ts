@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
-import { acquireProjectLock, createRun, type ProjectLock } from '../src/run.js';
+import { acquireProjectLock, createRun, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
 
 describe('run/session lifecycle', () => {
   it('creates the run directory tree and session checkpoint', async () => {
@@ -70,6 +70,31 @@ describe('run/session lifecycle', () => {
       const finalSession = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
       expect(finalSession.lifecycle_state).toBe('COMPLETED');
       expect(finalSession.ceo_conclusion).toBe('The board should proceed with the offer.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('tracks inactivity and forced-close state in the run checkpoint', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-constraint-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'budget-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+      });
+
+      const watchdog = new InactivityWatchdog({ timeoutMs: 5 });
+      watchdog.start();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(watchdog.isExpired()).toBe(true);
+
+      await markForcedClose(run, 'max_time');
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(sessionJson.forced_close.active).toBe(true);
+      expect(sessionJson.forced_close.reason).toBe('max_time');
+      expect(sessionJson.round_state).toBe('FORCED_CLOSE_PENDING');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
