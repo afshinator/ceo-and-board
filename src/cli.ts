@@ -88,6 +88,7 @@ export interface BoardRunCliOptions {
   autoRetry?: boolean;
   export?: boolean;
   exportDir?: string;
+  json?: boolean;
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string; memo?: string; snapshotPath?: string } | Array<{ sessionName: string; lifecycle: string }>> {
@@ -99,6 +100,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
     list: false,
     memo: false,
     export: false,
+    json: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -160,6 +162,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       continue;
     }
 
+    if (token === '--json') {
+      options.json = true;
+      continue;
+    }
+
     if (token === '--no-auto-retry') {
       options.autoRetry = false;
       continue;
@@ -168,6 +175,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
 
   if (options.list) {
     const runs = await listPersistedRuns(options.projectRoot ?? process.cwd());
+    const normalizedRuns = runs.map((run) => ({ sessionName: run.sessionName, lifecycle: run.lifecycle }));
+
+    if (options.json) {
+      const output = JSON.stringify(normalizedRuns, null, 2);
+      console.log(output);
+      return normalizedRuns;
+    }
+
     const lines = runs.length > 0
       ? runs.map((run) => `- ${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete${run.failedMembers > 0 ? ` | ${run.failedMembers} failed` : ''}`)
       : ['- No persisted board runs found.'];
@@ -177,11 +192,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       console.log(line);
     }
 
-    return runs.map((run) => ({ sessionName: run.sessionName, lifecycle: run.lifecycle }));
+    return normalizedRuns;
   }
 
   if (options.memo) {
     const memo = await readPersistedMemo(options.projectRoot ?? process.cwd(), options.sessionName);
+    if (options.json) {
+      const output = JSON.stringify({ lifecycle: 'MEMO', sessionName: options.sessionName ?? null, memo }, null, 2);
+      console.log(output);
+      return { lifecycle: 'MEMO', rendered: memo, memo };
+    }
     console.log(memo);
     return { lifecycle: 'MEMO', rendered: memo, memo };
   }
@@ -189,6 +209,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
   if (options.status) {
     const status = await summarizePersistedRunStatus(options.projectRoot ?? process.cwd(), options.sessionName);
     const rendered = renderBoardStatus(status);
+    if (options.json) {
+      const output = JSON.stringify({ lifecycle: status.lifecycle, runName: status.runName, runId: status.runId, totalMembers: status.totalMembers, completedMembers: status.completedMembers, failedMembers: status.failedMembers, memoPreview: status.memoPreview, members: status.members }, null, 2);
+      console.log(output);
+      return { lifecycle: status.lifecycle, rendered };
+    }
     console.log(rendered);
     return { lifecycle: status.lifecycle, rendered };
   }
@@ -208,6 +233,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       ? resolve(projectRoot, options.exportDir)
       : join(projectRoot, 'exports', selectedRun.sessionName);
     const snapshotPath = await exportPersistedRunSnapshot(projectRoot, selectedRun.sessionName, exportDir);
+
+    if (options.json) {
+      const output = JSON.stringify({ lifecycle: 'SNAPSHOT', sessionName: selectedRun.sessionName, snapshotPath }, null, 2);
+      console.log(output);
+      return { lifecycle: 'SNAPSHOT', rendered: snapshotPath, snapshotPath };
+    }
 
     console.log(`Exported board snapshot for ${selectedRun.sessionName} to ${snapshotPath}`);
     return { lifecycle: 'SNAPSHOT', rendered: snapshotPath, snapshotPath };
