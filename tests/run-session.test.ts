@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
-import { acquireProjectLock, createRun, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
+import { acquireProjectLock, createRun, evaluateConstraintState, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
 
 describe('run/session lifecycle', () => {
   it('creates the run directory tree and session checkpoint', async () => {
@@ -98,6 +98,32 @@ describe('run/session lifecycle', () => {
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  it('enforces max-time and max-budget hard closures before synthesis finishes', async () => {
+    const timeClose = evaluateConstraintState({
+      elapsedMinutes: 12,
+      totalBudget: 75,
+      minTimeMinutes: 2,
+      maxTimeMinutes: 10,
+      maxBudget: 100,
+    });
+
+    expect(timeClose.forcedClose).toBe(true);
+    expect(timeClose.reason).toBe('max_time');
+    expect(timeClose.voluntaryCloseAllowed).toBe(false);
+
+    const budgetClose = evaluateConstraintState({
+      elapsedMinutes: 9,
+      totalBudget: 101,
+      minTimeMinutes: 2,
+      maxTimeMinutes: 10,
+      maxBudget: 100,
+    });
+
+    expect(budgetClose.forcedClose).toBe(true);
+    expect(budgetClose.reason).toBe('max_budget');
+    expect(budgetClose.voluntaryCloseAllowed).toBe(false);
   });
 
   it('acquires a project lock and rejects a second live owner', async () => {

@@ -140,6 +140,52 @@ export async function createRun(
   };
 }
 
+export interface ConstraintEvaluation {
+  forcedClose: boolean;
+  reason?: ForcedCloseReason;
+  voluntaryCloseAllowed: boolean;
+}
+
+export interface ConstraintEvaluationInput {
+  elapsedMinutes: number;
+  totalBudget: number;
+  minTimeMinutes: number;
+  maxTimeMinutes: number;
+  maxBudget: number;
+}
+
+export function evaluateConstraintState(
+  input: ConstraintEvaluationInput,
+): ConstraintEvaluation {
+  const elapsedMinutes = Number(input.elapsedMinutes ?? 0);
+  const totalBudget = Number(input.totalBudget ?? 0);
+  const minTimeMinutes = Number(input.minTimeMinutes ?? 0);
+  const maxTimeMinutes = Number(input.maxTimeMinutes ?? Number.MAX_SAFE_INTEGER);
+  const maxBudget = Number(input.maxBudget ?? Number.MAX_SAFE_INTEGER);
+
+  if (elapsedMinutes >= maxTimeMinutes) {
+    return {
+      forcedClose: true,
+      reason: 'max_time',
+      voluntaryCloseAllowed: false,
+    };
+  }
+
+  if (totalBudget >= maxBudget) {
+    return {
+      forcedClose: true,
+      reason: 'max_budget',
+      voluntaryCloseAllowed: false,
+    };
+  }
+
+  return {
+    forcedClose: false,
+    reason: undefined,
+    voluntaryCloseAllowed: elapsedMinutes >= minTimeMinutes,
+  };
+}
+
 export interface InactivityWatchdogOptions {
   timeoutMs?: number;
 }
