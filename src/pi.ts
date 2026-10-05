@@ -1,4 +1,10 @@
+import { fileURLToPath } from 'node:url';
+
 import { RpcClient, type JsonAgentSessionEvent } from '@earendil-works/pi-coding-agent';
+
+const DEFAULT_PI_CLI_PATH = fileURLToPath(
+  new URL('../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js', import.meta.url),
+);
 
 export interface PiAgentStartConfig {
   agentName: string;
@@ -54,7 +60,10 @@ export class RpcPiAgentClient implements PiAgentClient {
   constructor(config: { agentName: string; piSessionId: string; cwd?: string; cliPath?: string }) {
     this.agentName = config.agentName;
     this.piSessionId = config.piSessionId;
-    this.client = new RpcClient({ cwd: config.cwd, cliPath: config.cliPath });
+    this.client = new RpcClient({
+      cwd: config.cwd,
+      cliPath: config.cliPath ?? DEFAULT_PI_CLI_PATH,
+    });
   }
 
   async start(config: PiAgentStartConfig): Promise<void> {
