@@ -155,7 +155,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
   if (options.list) {
     const runs = await listPersistedRuns(options.projectRoot ?? process.cwd());
     const lines = runs.length > 0
-      ? runs.map((run) => `- ${run.sessionName} (${run.lifecycle})`)
+      ? runs.map((run) => `- ${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete${run.failedMembers > 0 ? ` | ${run.failedMembers} failed` : ''}`)
       : ['- No persisted board runs found.'];
 
     console.log('Persisted runs:');

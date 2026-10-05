@@ -141,7 +141,22 @@ export type PersistedRunSummary = {
   sessionPath: string;
   lifecycle: string;
   createdAt: string;
+  memberCount: number;
+  completedMembers: number;
+  failedMembers: number;
+  memoPreview?: string | null;
 };
+
+export function renderPersistedRunList(runs: PersistedRunSummary[]): string {
+  if (runs.length === 0) {
+    return 'No persisted board runs found.';
+  }
+
+  return runs.map((run) => {
+    const summary = `${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete`;
+    return run.failedMembers > 0 ? `${summary} | ${run.failedMembers} failed` : summary;
+  }).join('\n');
+}
 
 export async function listPersistedRuns(projectRoot: string): Promise<PersistedRunSummary[]> {
   const deliberationsDir = join(projectRoot, '.pi', 'ceo-agents', 'deliberations');
@@ -159,6 +174,19 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
       try {
         const sessionJson = JSON.parse(await readFile(join(sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
         const directoryStat = await stat(sessionPath);
+        const board = sessionJson.board ?? {};
+        const memberNames = Object.keys(board);
+        const completedMembers = memberNames.filter((memberName) => board[memberName]?.status === 'COMPLETED').length;
+        const failedMembers = memberNames.filter((memberName) => board[memberName]?.status === 'FAILED').length;
+
+        let memoPreview: string | null = null;
+        try {
+          const memoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionJson.session_name ?? name, 'memo.md');
+          const memo = await readFile(memoPath, 'utf8');
+          memoPreview = extractMemoPreview(memo);
+        } catch {
+          // no memo yet; leave preview as null.
+        }
 
         summaries.push({
           sessionId: sessionJson.session_id ?? name,
@@ -172,6 +200,10 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
                 : 'INITIALIZING',
           ),
           createdAt: sessionJson.created_at ?? new Date(directoryStat.mtimeMs).toISOString(),
+          memberCount: memberNames.length,
+          completedMembers,
+          failedMembers,
+          memoPreview,
         });
       } catch {
         // Skip unreadable run directories to keep the listing resilient.

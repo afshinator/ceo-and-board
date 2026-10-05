@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
+import { listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -171,6 +171,39 @@ describe('runtime status display', () => {
       const persistedMemo = await readPersistedMemo(projectRoot, run.sessionName);
       expect(persistedMemo).toContain('## Final Decision');
       expect(persistedMemo).toContain('Proceed with the change.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('offers richer persisted-run metadata for selection', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-run-metadata-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'metadata-run',
+        briefContent: '# Brief\n\n## Situation\nCheck metadata',
+        boardMembers: ['Revenue', 'Ops'],
+      });
+
+      const sessionPath = join(run.sessionPath, 'session.json');
+      const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      sessionJson.lifecycle_state = 'COMPLETED';
+      sessionJson.board = {
+        Revenue: { status: 'COMPLETED', attempts: 1, last_output: 'Proceed.', last_error: null, last_updated: new Date().toISOString() },
+        Ops: { status: 'FAILED', attempts: 2, last_output: null, last_error: 'Time limit reached', last_updated: new Date().toISOString() },
+      };
+      await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+
+      const runs = await listPersistedRuns(projectRoot);
+      expect(runs[0]).toMatchObject({
+        sessionName: run.sessionName,
+        lifecycle: 'COMPLETED',
+        memberCount: 2,
+        completedMembers: 1,
+        failedMembers: 1,
+      });
+      expect(renderPersistedRunList(runs)).toContain(run.sessionName);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
