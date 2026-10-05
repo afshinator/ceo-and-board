@@ -1,4 +1,4 @@
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
@@ -267,6 +267,35 @@ export async function cleanupStalePersistedRuns(
   }
 
   return removed;
+}
+
+export async function exportPersistedRunSnapshot(
+  projectRoot: string,
+  sessionName: string,
+  destinationDir: string,
+): Promise<string> {
+  const runs = await listPersistedRuns(projectRoot);
+  const run = runs.find((candidate) => candidate.sessionName === sessionName) ?? null;
+
+  if (!run) {
+    throw new Error(`No persisted run found for session name "${sessionName}".`);
+  }
+
+  await mkdir(destinationDir, { recursive: true });
+  const sourceSessionPath = join(run.sessionPath);
+  const sourceMemoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionName, 'memo.md');
+  const sessionJson = JSON.parse(await readFile(join(sourceSessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+
+  await writeFile(join(destinationDir, 'session.json'), `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+
+  try {
+    const memoContent = await readFile(sourceMemoPath, 'utf8');
+    await writeFile(join(destinationDir, 'memo.md'), memoContent, 'utf8');
+  } catch {
+    // no memo file yet; skip it rather than failing the export.
+  }
+
+  return destinationDir;
 }
 
 export async function summarizePersistedRunStatus(

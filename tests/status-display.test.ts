@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { cleanupStalePersistedRuns, listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
+import { cleanupStalePersistedRuns, exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -259,6 +259,30 @@ describe('runtime status display', () => {
       expect(await listPersistedRuns(projectRoot)).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ sessionName: staleRun.sessionName }),
       ]));
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('exports a persisted run snapshot to a portable archive directory', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-export-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'export-run',
+        briefContent: '# Brief\n\n## Situation\nExport this run',
+        boardMembers: ['Revenue'],
+      });
+
+      const memo = '# Board Memo\n\n## Final Decision\nProceed with the export plan.\n';
+      await writeFile(run.memoPath, memo, 'utf8');
+
+      const destination = join(projectRoot, 'exports', 'run-export');
+      const snapshotDir = await exportPersistedRunSnapshot(projectRoot, run.sessionName, destination);
+
+      expect(snapshotDir).toBe(destination);
+      expect(await readFile(join(snapshotDir, 'session.json'), 'utf8')).toContain('export-run');
+      expect(await readFile(join(snapshotDir, 'memo.md'), 'utf8')).toContain('Proceed with the export plan.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
