@@ -78,6 +78,7 @@ Notes:
 - A9 memo synthesis now writes YAML frontmatter from deterministic harness state, validates it with Zod, validates Markdown structure/content with remark AST parsing, retries once with concrete validator errors, and preserves final statements plus partial memo on terminal synthesis failure.
 - A11 now has a tested runtime view-model, centralized lifecycle/member labels, latest activity selection, accepted-response counts, unavailable telemetry rendering, and full-range time/budget progress. A persistent Pi widget adapter supports collapsed rows, selected-member expansion, keyboard navigation, updates/disposal, and non-TUI mode guarding.
 - Added `apps/ceo/extensions/ceo-and-board.ts` to mount the runtime widget only in TUI mode. It derives the view from the latest persisted run, polls state while mounted, clears when no run is available, and disposes the timer/widget on session shutdown.
+- The parent Pi extension now registers `/ceo-begin` plus CEO-callable `converse` and `end_deliberation` tools. Begin validates/selects a brief, acquires and associates the project lock, seeds the CEO parent turn with the full brief and constraints, streams round responses back to the CEO, then closes/synthesizes and releases the lock.
 - Board turns now launch member executions concurrently and resolve only after the round barrier; unavailable failures do not block successful participants, and only accepted outputs enter shared conversation history.
 - The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `FINAL_CLOSING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
 - The runtime lifecycle is intentionally a simplified v1 model: broader conceptual v1.3 states such as `VALIDATING` and `CEO_FRAMING` are not currently represented as active persisted states in the implementation.
@@ -130,6 +131,7 @@ Notes:
 - Added A10 fake-Pi lifecycle coverage for multi-round completion, forced max-budget closure, min_time continuation, transient CEO recovery, synthesis terminal failure, and stale-lock recovery.
 - Added A11 view-model and widget tests for centralized presentation, activity/response semantics, min/max progress and unclamped values, unavailable telemetry, keyboard selection/expansion, and non-interactive mode guarding.
 - Added host-adapter tests for reading latest checkpoint, conversation, tool activity, and unavailable telemetry into the Pi widget model, plus polling/empty-state/disposal behavior; typechecked the entrypoint against the installed ExtensionAPI.
+- Added a fake-Pi extension integration test covering `/ceo-begin`, brief validation, CEO framing injection, `converse`, `end_deliberation`, memo completion, and project-lock release.
 - Added the A12 opt-in real-Pi smoke harness: selects `CEO_BOARD_PI_MODEL`, runs two turns, checks stats and response text, reopens the explicit session, verifies persisted history, and closes both RPC processes cleanly. Normal CI skips this test.
 - The status summary now includes a compact memo preview extracted from the saved final-decision section, so the newest recommendation is visible in the run summary without opening the memo file itself.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
@@ -146,7 +148,7 @@ Notes:
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
 - Complete A5 verification against longer-lived real Pi processes; scripted failure/replacement and same-session subprocess startup are covered, but a full provider-backed crash/restart smoke test remains environment-dependent.
-- The controller currently consumes a supplied round-request sequence; interactive `/ceo-begin` and CEO-callable `converse`/`end_deliberation` tools remain part of the Pi-extension work. The credentialed A12 smoke is implemented but has not been run in this environment.
+- The CLI controller still supports a supplied round-request sequence for deterministic runs. The credentialed A12 real-Pi smoke harness is implemented but has not been run in this environment.
 
 ## Decision log
 
