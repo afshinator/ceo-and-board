@@ -93,6 +93,59 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('synthesizes the CEO conclusion through a dedicated CEO adapter session when no direct conclusion is provided', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-ceo-synthesis-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'acquisition-decision',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const createdCEOEvents: Array<{ agentName: string; sessionId: string; sessionDir: string }> = [];
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          if (config.agentName === 'CEO') {
+            createdCEOEvents.push({
+              agentName: config.agentName,
+              sessionId: config.sessionId,
+              sessionDir: config.sessionDir,
+            });
+            return new ScriptedPiAgentClient({
+              agentName: config.agentName,
+              piSessionId: config.sessionId,
+            });
+          }
+
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      const turn = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+        Contrarian: 'We should take the lower-risk path.',
+      });
+
+      const memo = await orchestrator.writeCEOConclusion(run, turn);
+
+      const createdCEO = createdCEOEvents[0];
+      expect(createdCEO).toBeDefined();
+      if (!createdCEO) {
+        throw new Error('The CEO session was not created.');
+      }
+
+      expect(createdCEO.sessionId).toBe(`${run.sessionId}.ceo`);
+      expect(createdCEO.sessionDir).toContain(`${run.sessionName}/pi-sessions/ceo`);
+      expect(memo).toContain('The board should proceed with the offer.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks an unhealthy member as failed and retries once in the same session', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
 

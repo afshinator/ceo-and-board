@@ -170,9 +170,11 @@ export class ScriptedPiAgentClient implements PiAgentClient {
 
     this.promptIndex += 1;
     const normalizedName = this.agentName.toLowerCase();
-    const responseText = normalizedName.includes('revenue')
+    const responseText = normalizedName === 'ceo'
       ? 'The board should proceed with the offer.'
-      : 'The final argument is to keep the lower-risk path.';
+      : normalizedName.includes('revenue')
+        ? 'The board should proceed with the offer.'
+        : 'The final argument is to keep the lower-risk path.';
 
     this.lastAssistantText = responseText;
     this.emit({ type: 'message_update', text, response: responseText });

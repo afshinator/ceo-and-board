@@ -42,6 +42,45 @@ export class BoardOrchestrator {
     private readonly options: BoardOrchestratorOptions = {},
   ) {}
 
+  async synthesizeCEOConclusion(
+    run: RunSession,
+    turn: BoardTurnResult,
+    prompt?: string,
+  ): Promise<string> {
+    const synthesisPrompt = prompt ?? [
+      'You are the CEO consolidating the board discussion into one decision.',
+      '',
+      'Board member outputs:',
+      ...Object.entries(turn.outputs).map(([memberName, output]) => `${memberName}: ${output ?? 'No output recorded.'}`),
+      '',
+      'Provide a concise but reasoned final decision and recommendation for the run.',
+    ].join('\n');
+
+    const config: PiAgentStartConfig = {
+      agentName: 'CEO',
+      sessionId: `${run.sessionId}.ceo`,
+      sessionDir: join(run.sessionPath, 'pi-sessions', 'ceo'),
+      cwd: this.options.cwd ?? process.cwd(),
+      autoRetry: this.options.autoRetry ?? false,
+    };
+
+    const client = await this.clientFactory.create(config);
+    try {
+      await client.start(config);
+      await client.prompt(synthesisPrompt);
+      await client.waitUntilSettled();
+
+      const conclusion = await client.getLastAssistantText();
+      if (!conclusion || !conclusion.trim()) {
+        throw new Error('CEO synthesis produced no decision text.');
+      }
+
+      return conclusion.trim();
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
   async runBoardTurn(
     run: RunSession,
     promptsByMember: Record<string, string>,
@@ -132,8 +171,10 @@ export class BoardOrchestrator {
   async writeCEOConclusion(
     run: RunSession,
     turn: BoardTurnResult,
-    conclusion: string,
+    conclusion?: string,
   ): Promise<string> {
+    const finalConclusion = conclusion ?? (await this.synthesizeCEOConclusion(run, turn));
+
     const memo = [
       '# CEO Decision Memo',
       '',
@@ -146,7 +187,7 @@ export class BoardOrchestrator {
       '',
       '## CEO conclusion',
       '',
-      conclusion,
+      finalConclusion,
       '',
     ].join('\n');
 
@@ -170,7 +211,7 @@ export class BoardOrchestrator {
     sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
     sessionJson.status = 'READY';
     sessionJson.updated_at = new Date().toISOString();
-    sessionJson.ceo_conclusion = conclusion;
+    sessionJson.ceo_conclusion = finalConclusion;
 
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
     return memo;
