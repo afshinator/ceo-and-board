@@ -395,6 +395,48 @@ export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, Board
   );
 }
 
+function extractFinalDecision(body: string): string {
+  const match = body.match(/## Final Decision[ \t]*\n([\s\S]*?)(?=\n## |\n# |$)/);
+  return match ? match[1].trim() : body.trim();
+}
+
+function buildScaffoldedMemoBody(finalDecision: string, boardStances: string[]): string {
+  return [
+    '## Final Decision',
+    '',
+    finalDecision,
+    '',
+    '## Ranked Recommendations',
+    '',
+    `1. ${finalDecision}`,
+    '',
+    '## Decision Map',
+    '',
+    '- Board discussion resolved to a single CEO decision.',
+    '',
+    '## Board Stances',
+    '',
+    ...boardStances,
+    '## Tensions & Dissent',
+    '',
+    'The board surfaced the main trade-off and dissenting position before the CEO synthesized the final recommendation.',
+    '',
+    '## Trade-offs & Risks',
+    '',
+    'The chief risks are execution risk and decision quality under uncertainty.',
+    '',
+    '## Next Actions',
+    '',
+    '1. Confirm the chosen direction with the owning team.',
+    '2. Document the specific implementation order.',
+    '',
+    '## Deliberation Summary',
+    '',
+    `The board reviewed the case and the CEO selected: ${finalDecision}`,
+    '',
+  ].join('\n');
+}
+
 export class BoardOrchestrator {
   private readonly memberClients = new Map<string, PiAgentClient>();
 
@@ -470,8 +512,19 @@ export class BoardOrchestrator {
       'Accepted final board statements:',
       ...synthesisInputs,
       '',
-      'Provide a concise but reasoned final decision and recommendation for the run.',
-      'Return only the text for the Final Decision section. Do not include the "Final Decision" heading, any other Markdown headings, or the rest of the memo. The harness creates and validates all memo headings.',
+      'Provide the complete board memo body. Use exactly these Markdown H2 headings, once each, in this exact order:',
+      '## Final Decision',
+      '## Ranked Recommendations',
+      '## Decision Map',
+      '## Board Stances',
+      '## Tensions & Dissent',
+      '## Trade-offs & Risks',
+      '## Next Actions',
+      '## Deliberation Summary',
+      '',
+      'Fill every section with content derived from the accepted final board statements above.',
+      'Do not emit the "# Board Memo" H1 heading or any YAML frontmatter; the harness adds those.',
+      'Do not emit any heading other than the eight listed H2 headings.',
     ].filter((line) => line !== undefined).join('\n');
 
     const config: PiAgentStartConfig = {
@@ -822,7 +875,9 @@ export class BoardOrchestrator {
     turn: BoardTurnResult,
     conclusion?: string,
   ): Promise<string> {
-    let finalConclusion = conclusion ?? null;
+    const directDecision = conclusion?.trim() || null;
+    let decisionText = directDecision;
+    let memoBody: string | null = null;
     let memo = '';
     let lastFailure = 'CEO synthesis returned no accepted memo content.';
 
@@ -840,11 +895,12 @@ export class BoardOrchestrator {
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        if (!finalConclusion) {
+        if (!decisionText && !memoBody) {
           const retryPrompt = attempt === 1
             ? undefined
             : `The previous CEO memo attempt was not accepted. Correct these errors: ${lastFailure}`;
-          finalConclusion = await this.synthesizeCEOConclusion(run, turn, retryPrompt);
+          memoBody = await this.synthesizeCEOConclusion(run, turn, retryPrompt);
+          decisionText = extractFinalDecision(memoBody);
         }
 
         const latest = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
@@ -884,6 +940,9 @@ export class BoardOrchestrator {
           return `### ${memberName}\n\n${stance}\n`;
         });
 
+        const body = memoBody && memoBody.trim()
+          ? memoBody
+          : buildScaffoldedMemoBody(decisionText ?? '', boardStances);
         memo = [
           '---',
           frontmatter,
@@ -891,44 +950,15 @@ export class BoardOrchestrator {
           '',
           `# Board Memo: ${title}`,
           '',
-          '## Final Decision',
-          '',
-          finalConclusion ?? '',
-          '',
-          '## Ranked Recommendations',
-          '',
-          `1. ${finalConclusion ?? ''}`,
-          '',
-          '## Decision Map',
-          '',
-          '- Board discussion resolved to a single CEO decision.',
-          '',
-          '## Board Stances',
-          '',
-          ...boardStances,
-          '## Tensions & Dissent',
-          '',
-          'The board surfaced the main trade-off and dissenting position before the CEO synthesized the final recommendation.',
-          '',
-          '## Trade-offs & Risks',
-          '',
-          'The chief risks are execution risk and decision quality under uncertainty.',
-          '',
-          '## Next Actions',
-          '',
-          '1. Confirm the chosen direction with the owning team.',
-          '2. Document the specific implementation order.',
-          '',
-          '## Deliberation Summary',
-          '',
-          `The board reviewed the case and the CEO selected: ${finalConclusion ?? ''}`,
+          body,
           '',
         ].join('\n');
 
         const validation = validateDecisionMemo(memo, expectedMetadata);
         if (!validation.ok) {
           lastFailure = validation.errors.join('; ');
-          finalConclusion = null;
+          decisionText = null;
+          memoBody = null;
           continue;
         }
 
@@ -955,7 +985,7 @@ export class BoardOrchestrator {
         completedSession.lifecycle_state = 'COMPLETED';
         completedSession.legacy_lifecycle_state = 'CEO_SYNTHESIS';
         completedSession.updated_at = new Date().toISOString();
-        completedSession.ceo_conclusion = finalConclusion;
+        completedSession.ceo_conclusion = decisionText;
         completedSession.telemetry = buildBoardTelemetry(turn);
         const endedAt = new Date();
         const elapsedMinutes = Math.max(0, (endedAt.getTime() - new Date(completedSession.created_at).getTime()) / 60_000);
@@ -963,7 +993,7 @@ export class BoardOrchestrator {
         await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
           from: 'CEO',
           to: 'all',
-          message: finalConclusion ?? '',
+          message: decisionText ?? '',
         });
         await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
           type: 'meeting_end',
@@ -977,7 +1007,8 @@ export class BoardOrchestrator {
         return memo;
       } catch (error) {
         lastFailure = error instanceof Error ? error.message : String(error);
-        finalConclusion = null;
+        decisionText = null;
+        memoBody = null;
       }
     }
 
@@ -987,7 +1018,7 @@ export class BoardOrchestrator {
     failedSession.status = 'FAILED';
     failedSession.lifecycle_state = 'FAILED';
     failedSession.updated_at = new Date().toISOString();
-    failedSession.ceo_conclusion = finalConclusion;
+    failedSession.ceo_conclusion = decisionText;
     failedSession.last_error = lastFailure;
     failedSession.telemetry = buildBoardTelemetry(turn);
     if (memo) {

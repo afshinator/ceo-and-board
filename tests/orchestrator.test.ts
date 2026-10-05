@@ -1139,6 +1139,8 @@ describe('board orchestrator', () => {
       expect(createdCEO.sessionId).toBe(`${run.sessionId}.ceo`);
       expect(createdCEO.sessionDir).toContain(`${run.sessionName}/pi-sessions/ceo`);
       expect(memo).toContain('The board should proceed with the offer.');
+      expect(memo).toContain('2. Keep the lower-risk path as a fallback.');
+      expect(memo).not.toContain('Board discussion resolved to a single CEO decision.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1173,7 +1175,9 @@ describe('board orchestrator', () => {
             async prompt(prompt: string) { ceoPrompts.push(prompt); },
             async waitUntilSettled() { return; },
             async getLastAssistantText() {
-              return ceoAttempts === 1 ? '' : 'The board should proceed with the offer.';
+              return ceoAttempts === 1
+                ? ''
+                : '## Final Decision\n\nThe board should proceed with the offer.\n\n## Ranked Recommendations\n\n1. Proceed.\n\n## Decision Map\n\n- Single decision.\n\n## Board Stances\n\n- Revenue agrees.\n\n## Tensions & Dissent\n\n- None recorded.\n\n## Trade-offs & Risks\n\n- Execution risk.\n\n## Next Actions\n\n1. Confirm.\n\n## Deliberation Summary\n\nThe board chose the offer.\n';
             },
             async getSessionStats() {
               return { messageCount: ceoAttempts, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
@@ -1202,7 +1206,7 @@ describe('board orchestrator', () => {
     }
   });
 
-  it('asks the CEO for decision text only and retries heading contamination with validator feedback', async () => {
+  it('synthesizes the full memo body and retries a contaminated attempt with validator feedback', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-heading-retry-'));
 
     try {
@@ -1231,7 +1235,7 @@ describe('board orchestrator', () => {
               ceoResponses += 1;
               return ceoResponses === 1
                 ? '## Final Decision\nProceed.\n\n## Ranked Recommendations\n1. Proceed.'
-                : 'Proceed after confirming integration readiness.';
+                : '## Final Decision\n\nProceed after confirming integration readiness.\n\n## Ranked Recommendations\n\n1. Proceed.\n\n## Decision Map\n\n- Single decision.\n\n## Board Stances\n\n- Revenue agrees.\n\n## Tensions & Dissent\n\n- None.\n\n## Trade-offs & Risks\n\n- Execution risk.\n\n## Next Actions\n\n1. Confirm.\n\n## Deliberation Summary\n\nThe board chose to proceed.\n';
             },
             async getSessionStats() {
               return { messageCount: ceoResponses, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
@@ -1248,11 +1252,12 @@ describe('board orchestrator', () => {
       const memo = await orchestrator.writeCEOConclusion(run, turn);
 
       expect(ceoResponses).toBe(2);
-      expect(ceoPrompts[0]).toMatch(/only the text for the Final Decision section/i);
-      expect(ceoPrompts[0]).toMatch(/do not include.*heading|no Markdown headings/i);
-      expect(ceoPrompts[1]).toMatch(/exactly once/i);
+      expect(ceoPrompts[0]).toMatch(/complete board memo body/i);
+      expect(ceoPrompts[0]).toMatch(/exactly these Markdown H2 headings/i);
+      expect(ceoPrompts[1]).toMatch(/must appear exactly once/i);
       expect(memo.match(/^## Final Decision$/gm)).toHaveLength(1);
       expect(memo).toContain('Proceed after confirming integration readiness.');
+      expect(memo).not.toContain('Board discussion resolved to a single CEO decision.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
