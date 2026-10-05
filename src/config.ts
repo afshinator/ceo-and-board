@@ -130,19 +130,15 @@ export async function findConfigFile(projectRoot: string): Promise<string | unde
   return undefined;
 }
 
-export async function loadConfigIfPresent(projectRoot: string): Promise<CeoBoardConfig | undefined> {
-  const configPath = await findConfigFile(projectRoot);
-  if (!configPath) {
-    return undefined;
-  }
-  return loadConfig(configPath);
-}
-
 export async function resolveRunPaths(
   projectRoot: string,
   paths?: Partial<CeoBoardConfig['paths']>,
 ): Promise<ResolvedRunPaths> {
-  const resolvedPaths = paths ?? (await loadConfigIfPresent(projectRoot))?.paths ?? {};
+  const config = paths ? undefined : await (async () => {
+    const configPath = await findConfigFile(projectRoot);
+    return configPath ? loadConfig(configPath) : undefined;
+  })();
+  const resolvedPaths = paths ?? config?.paths ?? {};
 
   return {
     briefsDir: resolvePath(projectRoot, resolvedPaths.briefs ?? join(DEFAULT_RUNTIME_DIR, 'briefs')),

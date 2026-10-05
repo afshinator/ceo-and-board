@@ -231,14 +231,13 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
 }
 
 export async function readPersistedMemo(projectRoot: string, sessionName?: string): Promise<string> {
-  const { deliberationsDir } = await resolveRunPaths(projectRoot);
   const runs = await listPersistedRuns(projectRoot);
   const selectedRun = sessionName
     ? runs.find((run) => run.sessionName === sessionName) ?? runs[0]
     : runs[0];
 
   if (!selectedRun) {
-    throw new Error(`No persisted board runs found under ${deliberationsDir}.`);
+    throw new Error('No persisted board runs found.');
   }
 
   try {

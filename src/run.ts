@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
-import { findConfigFile, loadConfig, resolveAgentPath, resolveRunPaths } from './config.js';
+import { DEFAULT_RUNTIME_DIR, findConfigFile, loadConfig, resolveAgentPath, resolveRunPaths } from './config.js';
 import { loadAgentDefinition } from './agents.js';
 
 export interface LockOwnership {
@@ -78,8 +78,6 @@ export interface RunSession {
   ceoAgentPath?: string;
 }
 
-const ROOT_RUNTIME_DIR = '.pi/ceo-agents';
-
 function slugify(value: string): string {
   return value
     .trim()
@@ -113,8 +111,8 @@ async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
 }
 
 async function ensureRuntimeDirectories(projectRoot: string): Promise<void> {
-  await mkdir(join(projectRoot, ROOT_RUNTIME_DIR, 'deliberations'), { recursive: true });
-  await mkdir(join(projectRoot, ROOT_RUNTIME_DIR, 'memos'), { recursive: true });
+  await mkdir(join(projectRoot, DEFAULT_RUNTIME_DIR, 'deliberations'), { recursive: true });
+  await mkdir(join(projectRoot, DEFAULT_RUNTIME_DIR, 'memos'), { recursive: true });
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -264,7 +262,7 @@ export async function createRun(
     sessionName,
     sessionPath,
     memoPath,
-    lockPath: join(projectRoot, ROOT_RUNTIME_DIR, '.active-run.lock'),
+    lockPath: join(projectRoot, DEFAULT_RUNTIME_DIR, '.active-run.lock'),
     board,
     boardAgentPaths: options.boardMemberPaths ?? {},
     boardModels,
@@ -489,7 +487,7 @@ export async function acquireProjectLock(
   projectRoot: string,
   ownership: LockOwnership,
 ): Promise<ProjectLock> {
-  const lockPath = join(projectRoot, ROOT_RUNTIME_DIR, '.active-run.lock');
+  const lockPath = join(projectRoot, DEFAULT_RUNTIME_DIR, '.active-run.lock');
   await mkdir(dirname(lockPath), { recursive: true });
 
   while (true) {
