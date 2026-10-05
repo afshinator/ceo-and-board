@@ -343,6 +343,8 @@ export async function summarizePersistedRunStatus(
     memoPath: join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionJson.session_name, 'memo.md'),
     lockPath: join(projectRoot, '.pi', 'ceo-agents', '.active-run.lock'),
     board: sessionJson.board ?? {},
+    boardAgentPaths: sessionJson.board_agent_paths ?? {},
+    boardModels: sessionJson.board_models ?? {},
   };
 
   const memberResults = Object.fromEntries(

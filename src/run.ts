@@ -198,6 +198,14 @@ export async function createRun(
     ]),
   );
 
+  const boardModels: Record<string, string> = {};
+  if (options.boardMemberPaths) {
+    for (const [memberName, agentPath] of Object.entries(options.boardMemberPaths)) {
+      const agent = await loadAgentDefinition(agentPath);
+      boardModels[memberName] = agent.frontmatter.model;
+    }
+  }
+
   const conversationPath = join(sessionPath, 'conversation.jsonl');
   const toolUsePath = join(sessionPath, 'tool-use.jsonl');
 
@@ -224,6 +232,8 @@ export async function createRun(
       voluntary_close_allowed: true,
     },
     board,
+    board_agent_paths: options.boardMemberPaths ?? {},
+    board_models: boardModels,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -236,14 +246,6 @@ export async function createRun(
     timestamp: new Date().toISOString(),
     brief: options.briefName,
   });
-
-  const boardModels: Record<string, string> = {};
-  if (options.boardMemberPaths) {
-    for (const [memberName, agentPath] of Object.entries(options.boardMemberPaths)) {
-      const agent = await loadAgentDefinition(agentPath);
-      boardModels[memberName] = agent.frontmatter.model;
-    }
-  }
 
   return {
     sessionId,
