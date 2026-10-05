@@ -127,4 +127,77 @@ describe('Pi CEO–Board extension', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('includes supporting sibling file contents in the CEO framing context (implementation-1.4 B6)', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-sibling-context-'));
+    const configPath = join(projectRoot, 'ceo-and-board-configuration.yaml');
+    const briefDir = join(projectRoot, '.pi', 'ceo-agents', 'briefs', 'acquisition');
+    await import('node:fs/promises').then(({ mkdir }) => mkdir(briefDir, { recursive: true }));
+    await writeFile(configPath, [
+      'meeting:',
+      '  constraints:',
+      '    min_time_minutes: 0',
+      '    max_time_minutes: 60',
+      '    min_budget: 1',
+      '    max_budget: 25',
+      '  editor: code',
+      'paths:',
+      '  briefs: .pi/ceo-agents/briefs',
+      '  deliberations: .pi/ceo-agents/deliberations',
+      '  memos: .pi/ceo-agents/memos',
+      '  agents: .pi/ceo-agents/agents',
+      'board:',
+      '  - name: Revenue',
+      '    path: revenue.md',
+    ].join('\n'), 'utf8');
+    await import('node:fs/promises').then(({ mkdir }) => mkdir(join(projectRoot, '.pi', 'ceo-agents', 'agents'), { recursive: true }));
+    await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'revenue.md'), '---\nname: revenue\nmodel: test/model\n---\n\n## Purpose\nAssess revenue.\n', 'utf8');
+    await writeFile(join(briefDir, 'brief.md'), [
+      '# Brief',
+      '',
+      '## Situation', 'Decide.',
+      '## Stakes', 'Capital.',
+      '## Constraints', 'Evidence based.',
+      '## Key Question', 'Proceed?',
+    ].join('\n\n'), 'utf8');
+    await writeFile(join(briefDir, 'metrics.md'), 'REVENUE_BASELINE_42', 'utf8');
+
+    const commands = new Map<string, any>();
+    const userMessages: string[] = [];
+    const pi = {
+      registerCommand(name: string, definition: any) { commands.set(name, definition); },
+      registerTool() {},
+      sendUserMessage(content: string) { userMessages.push(content); },
+      on() { return () => {}; },
+    } as unknown as ExtensionAPI;
+
+    try {
+      registerCeoBoardExtension(pi, {
+        clientFactory: {
+          async create(config) {
+            return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+          },
+        },
+      });
+      const context: any = {
+        mode: 'tui',
+        hasUI: true,
+        cwd: projectRoot,
+        ui: {
+          async select() { return 'acquisition'; },
+          notify() {},
+          setStatus() {},
+          setWidget() {},
+          onTerminalInput() { return () => {}; },
+        },
+      };
+
+      await commands.get('ceo-begin')?.handler('acquisition', context);
+
+      expect(userMessages[0]).toContain('REVENUE_BASELINE_42');
+      expect(userMessages[0]).toContain('metrics.md');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

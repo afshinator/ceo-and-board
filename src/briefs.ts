@@ -72,12 +72,14 @@ export function validateBrief(
 
   for (const section of requiredSections) {
     const headingNames = headings.map((heading) => heading.trim());
-    const exists = headingNames.some(
+    const matches = headingNames.filter(
       (heading) => heading.toLowerCase() === section.section.toLowerCase(),
     );
 
-    if (!exists) {
+    if (matches.length === 0) {
       errors.push(`Missing required section: ${section.section}`);
+    } else if (matches.length > 1) {
+      errors.push(`Duplicate required section: ${section.section}`);
     }
   }
 

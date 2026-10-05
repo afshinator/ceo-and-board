@@ -173,6 +173,14 @@ export function registerCeoBoardExtension(
           } else {
             framingBody = '';
           }
+          const supportingContents = await Promise.all(brief.supportingFiles.map(async (fileName) => {
+            try {
+              const contents = await readFile(join(briefsDirectory, brief.name, fileName), 'utf8');
+              return `### Supporting file: ${fileName}\n${contents}`;
+            } catch {
+              return null;
+            }
+          }));
           const framingRequest = [
             framingBody || `You are the CEO for decision session ${run.sessionName}.`,
             '',
@@ -188,7 +196,10 @@ export function registerCeoBoardExtension(
             '',
             '## Brief',
             briefContent,
-          ].join('\n\n');
+            ...supportingContents.filter((block): block is string => block !== null).length
+              ? ['', '## Supporting Context', ...supportingContents.filter((block): block is string => block !== null)]
+              : [],
+          ].flat().join('\n\n');
           context.ui.setStatus('ceo-board', `Active: ${brief.name}`);
           pi.sendUserMessage(framingRequest);
           context.ui.notify(`CEO–Board run started: ${run.sessionName}.`, 'info');
