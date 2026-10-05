@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig } from './pi.js';
-import type { RunSession } from './run.js';
+import { captureRunSnapshot, type RunSession } from './run.js';
 
 export interface BoardTurnResult {
   runId: string;
@@ -138,6 +138,8 @@ export class BoardOrchestrator {
       autoRetry: this.options.autoRetry ?? false,
     };
 
+    await captureRunSnapshot(run, { ceoPrompt: synthesisPrompt });
+
     const client = await this.clientFactory.create(config);
     try {
       await client.start(config);
@@ -161,6 +163,7 @@ export class BoardOrchestrator {
     sessionJson.lifecycle_state = 'DELIBERATING';
     sessionJson.updated_at = new Date().toISOString();
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await captureRunSnapshot(run, { promptsByMember });
 
     const outputs: Record<string, string | null> = {};
     const memberResults: Record<string, BoardTurnMemberResult> = {};

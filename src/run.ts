@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 export interface LockOwnership {
   owner: string;
@@ -134,6 +134,7 @@ export async function createRun(
     session_id: sessionId,
     session_name: sessionName,
     brief: options.briefName,
+    brief_content: options.briefContent,
     brief_description: options.briefContent.slice(0, 200).replace(/\s+/g, ' ').trim(),
     status: 'READY',
     lifecycle_state: 'INITIALIZING' as RunLifecycleState,
@@ -159,6 +160,42 @@ export async function createRun(
     lockPath: join(projectRoot, ROOT_RUNTIME_DIR, '.active-run.lock'),
     board,
   };
+}
+
+export async function captureRunSnapshot(
+  run: RunSession,
+  options: { briefContent?: string; promptsByMember?: Record<string, string>; ceoPrompt?: string } = {},
+): Promise<string> {
+  const snapshotDir = join(run.sessionPath, 'snapshot');
+  await mkdir(snapshotDir, { recursive: true });
+  const promptDir = join(snapshotDir, 'prompts');
+  await mkdir(promptDir, { recursive: true });
+
+  const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+  const briefContent = options.briefContent ?? (typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '');
+
+  if (briefContent) {
+    await writeFile(join(snapshotDir, 'brief.md'), briefContent, 'utf8');
+  }
+
+  const projectRoot = join(run.sessionPath, '..', '..', '..', '..');
+  const configPath = join(projectRoot, 'ceo-and-board-configuration.yaml');
+  try {
+    await copyFile(configPath, join(snapshotDir, 'ceo-and-board-configuration.yaml'));
+  } catch {
+    // The project may not include a root config file; a snapshot without it is acceptable.
+  }
+
+  for (const [memberName, promptText] of Object.entries(options.promptsByMember ?? {})) {
+    const slug = memberName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'member';
+    await writeFile(join(promptDir, `${slug}.txt`), promptText, 'utf8');
+  }
+
+  if (options.ceoPrompt) {
+    await writeFile(join(snapshotDir, 'ceo-prompt.txt'), options.ceoPrompt, 'utf8');
+  }
+
+  return snapshotDir;
 }
 
 export interface ConstraintEvaluation {

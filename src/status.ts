@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
@@ -283,10 +283,17 @@ export async function exportPersistedRunSnapshot(
 
   await mkdir(destinationDir, { recursive: true });
   const sourceSessionPath = join(run.sessionPath);
+  const sourceSnapshotDir = join(sourceSessionPath, 'snapshot');
   const sourceMemoPath = join(projectRoot, '.pi', 'ceo-agents', 'memos', sessionName, 'memo.md');
   const sessionJson = JSON.parse(await readFile(join(sourceSessionPath, 'session.json'), 'utf8')) as Record<string, any>;
 
   await writeFile(join(destinationDir, 'session.json'), `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+
+  try {
+    await cp(sourceSnapshotDir, join(destinationDir, 'snapshot'), { recursive: true, force: true });
+  } catch {
+    // the snapshot directory may not exist yet; keep the export usable without it.
+  }
 
   try {
     const memoContent = await readFile(sourceMemoPath, 'utf8');

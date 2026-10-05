@@ -264,6 +264,39 @@ describe('runtime status display', () => {
     }
   });
 
+  it('captures the brief and rendered member prompts in the run snapshot', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-snapshot-inputs-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'snapshot-run',
+        briefContent: '# Brief\n\n## Situation\nExport this run and keep the prompt archive.',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case and capture the exact prompt used.',
+        Contrarian: 'We should choose the lower-risk path and record the dissent in the package.',
+      });
+
+      const snapshotDir = join(run.sessionPath, 'snapshot');
+      expect(await readFile(join(snapshotDir, 'brief.md'), 'utf8')).toContain('Export this run and keep the prompt archive.');
+      expect(await readFile(join(snapshotDir, 'prompts', 'revenue.txt'), 'utf8')).toContain('Analyze the acquisition case and capture the exact prompt used.');
+      expect(await readFile(join(snapshotDir, 'prompts', 'contrarian.txt'), 'utf8')).toContain('lower-risk path');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('exports a persisted run snapshot to a portable archive directory', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-export-'));
 
