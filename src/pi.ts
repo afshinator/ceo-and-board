@@ -70,15 +70,17 @@ export class RpcPiAgentClient implements PiAgentClient {
   private settled = false;
   private runtimeListenerAttached = false;
 
-  constructor(config: { agentName: string; piSessionId: string; cwd?: string; cliPath?: string; sessionDir?: string }) {
+  constructor(config: { agentName: string; piSessionId: string; cwd?: string; cliPath?: string; sessionDir?: string; model?: string }) {
     this.agentName = config.agentName;
     this.piSessionId = config.piSessionId;
     this.client = new RpcClient({
       cwd: config.cwd,
       cliPath: config.cliPath ?? DEFAULT_PI_CLI_PATH,
-      args: config.sessionDir
-        ? ['--session-id', config.piSessionId, '--session-dir', config.sessionDir]
-        : ['--session-id', config.piSessionId],
+      args: [
+        ...(config.model ? ['--model', config.model] : []),
+        '--session-id', config.piSessionId,
+        ...(config.sessionDir ? ['--session-dir', config.sessionDir] : []),
+      ],
     });
   }
 
