@@ -61,9 +61,13 @@ Status: board orchestration, state persistence, recovery, CEO synthesis, and lif
 Notes:
 - The config/agent/brief layer, run/session lock lifecycle, Pi adapter boundary, and board process orchestration are now coded and tested.
 - The project now includes a board orchestrator that runs each member in its own run-scoped Pi session and records the member outcome back into the session checkpoint.
-- The orchestrator now retries a failed member execution once in the same run-scoped Pi session when `autoRetry` is enabled, and records the final healthy or failed status in the checkpoint.
-- The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
+- Retry ownership remains harness-owned: the orchestrator applies the exactly-one retry loop, while the Pi client is not treated as the authority for native auto-retry behavior.
+- The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `FINAL_CLOSING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
+- The runtime lifecycle is intentionally a simplified v1 model: broader conceptual v1.3 states such as `VALIDATING` and `CEO_FRAMING` are not currently represented as active persisted states in the implementation.
 - Added an `InactivityWatchdog` primitive and a `markForcedClose()` checkpoint update so the run persists timeout-driven and max-time/max-budget control state in a durable, observable form.
+- Added `evaluateConstraintState()` to enforce `max_time` and `max_budget` as hard closure gates and to disable voluntary close once those thresholds are reached.
+- Added `finalizeForcedClose()` so a pending forced-close run transitions into the explicit `FINAL_CLOSING` lifecycle before synthesis/close continues.
+- Added `finalizeRun()` so a closing board round persists final member statements and then immediately transitions through the normal CEO synthesis flow without bypassing the memo validation path.
 - The board member result now exposes explicit `status`, `attempts`, and `error` metadata, making failure and retry visibility part of the runtime contract instead of an implicit side effect.
 - The run state now persists per-member telemetry in `session.json`, including `status`, `response_count`, `attempts`, and `last_output`/`last_error` so the UI or runtime can render the live board state without reconstructing it from raw logs.
 - The CEO synthesis step now goes through a dedicated CEO Pi session, synthesizes a conclusion from the board outputs, writes the final memo to the run output path, and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
@@ -90,7 +94,9 @@ Notes:
 - Added a dedicated CEO Pi session to synthesize the final conclusion from the board outputs, rather than accepting a raw, external conclusion value.
 - Added a deterministic memo validator that rejects blank or structurally invalid `Final Decision` sections and triggers the single allowed synthesis retry before failing the run.
 - Added a board status summary renderer that exposes the live lifecycle and per-member completion states in a compact, UI-friendly report.
-- Verified the orchestration, recovery, synthesis, telemetry, and runtime-status layer with dedicated tests and a clean TypeScript compile.
+- Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
+- Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.
+- Verified the orchestration, recovery, synthesis, telemetry, runtime-status, and hard-constraint/final-close control layer with dedicated tests and a clean TypeScript compile.
 - Committed and pushed the verified work to origin successfully.
 
 ## Open items to track over time
@@ -114,3 +120,6 @@ The config/agent/brief layer can proceed independently of Pi verification, but o
 
 ### D4
 The next implementation step is runtime polish and richer board execution semantics on top of the verified adapter, retry-aware orchestration, and established session checkpoints.
+
+### D5
+The current implementation intentionally uses a simplified runtime lifecycle model instead of the broader conceptual v1.3 state names. The code is the source of truth for the active state machine until the design is intentionally widened again.

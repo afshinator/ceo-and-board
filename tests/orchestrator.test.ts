@@ -278,6 +278,46 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('runs the final close-through-synthesis handoff for a forced-close board turn', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-final-close-handoff-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'forced-close-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      const turn = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+        Contrarian: 'We should take the lower-risk path.',
+      });
+
+      const outcome = await orchestrator.finalizeRun(run, turn, {
+        Revenue: 'Final position: proceed with the offer.',
+        Contrarian: 'Final position: protect downside until market data arrives.',
+      });
+
+      expect(outcome.memo).toContain('The board should proceed with the offer.');
+      expect(outcome.finalStatements.Revenue).toContain('Final position: proceed with the offer.');
+
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(sessionJson.lifecycle_state).toBe('COMPLETED');
+      expect(sessionJson.round_state).toBe('CEO_SYNTHESIS_COMPLETE');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks an unhealthy member as failed and retries once in the same session', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
 

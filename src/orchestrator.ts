@@ -275,6 +275,17 @@ export class BoardOrchestrator {
     return finalStatements;
   }
 
+  async finalizeRun(
+    run: RunSession,
+    turn: BoardTurnResult,
+    finalStatementsByMember?: Record<string, string>,
+  ): Promise<{ memo: string; finalStatements: Record<string, string> }> {
+    const finalStatements = await this.endDeliberation(run, turn, finalStatementsByMember);
+    const memo = await this.writeCEOConclusion(run, turn);
+
+    return { memo, finalStatements };
+  }
+
   async writeCEOConclusion(
     run: RunSession,
     turn: BoardTurnResult,
