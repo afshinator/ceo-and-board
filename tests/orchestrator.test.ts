@@ -202,6 +202,44 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('persists board telemetry for the current run state', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-telemetry-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'risk-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+          });
+        },
+      });
+
+      const turn = await orchestrator.runBoardTurn(run, {
+        Revenue: 'Analyze the acquisition case.',
+        Contrarian: 'We should take the lower-risk path.',
+      });
+
+      await orchestrator.writeCEOConclusion(run, turn, 'The board should proceed with the offer.');
+
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+
+      expect(sessionJson.telemetry).toBeDefined();
+      expect(sessionJson.telemetry.Revenue.status).toBe('COMPLETED');
+      expect(sessionJson.telemetry.Revenue.response_count).toBe(1);
+      expect(sessionJson.telemetry.Contrarian.status).toBe('COMPLETED');
+      expect(sessionJson.telemetry.Contrarian.response_count).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks an unhealthy member as failed and retries once in the same session', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-retry-'));
 

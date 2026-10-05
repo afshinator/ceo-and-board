@@ -63,6 +63,7 @@ Notes:
 - The project now includes a board orchestrator that runs each member in its own run-scoped Pi session and records the member outcome back into the session checkpoint.
 - The orchestrator now retries a failed member execution once in the same run-scoped Pi session when `autoRetry` is enabled, and records the final healthy or failed status in the checkpoint.
 - The board member result now exposes explicit `status`, `attempts`, and `error` metadata, making failure and retry visibility part of the runtime contract instead of an implicit side effect.
+- The run state now persists per-member telemetry in `session.json`, including `status`, `response_count`, `attempts`, and `last_output`/`last_error` so the UI or runtime can render the live board state without reconstructing it from raw logs.
 - The CEO synthesis step now goes through a dedicated CEO Pi session, synthesizes a conclusion from the board outputs, writes the final memo to the run output path, and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
 - The memo validator now treats a blank or structurally invalid `Final Decision` section as a synthesis failure and triggers the required single retry; a second invalid memo marks the run `FAILED` while preserving the accepted board statements.
 - The next implementation step is runtime polish and richer board-level execution semantics, not a new runtime API gate.
@@ -82,6 +83,7 @@ Notes:
 - Added the CEO synthesis memo step that writes the final deliberation result to the run memo path and persists member state in the run checkpoint.
 - Added a same-session retry path for a failed member execution when the orchestrator is configured to auto-retry.
 - Added explicit member execution metadata (`status`, `attempts`, `error`) so board runtime failures are visible in the orchestration result and saved checkpoint state.
+- Added persisted board telemetry in `session.json` with `status`, `response_count`, `attempts`, and last-output/error snapshots for the current run state.
 - Added a dedicated CEO Pi session to synthesize the final conclusion from the board outputs, rather than accepting a raw, external conclusion value.
 - Added a deterministic memo validator that rejects blank or structurally invalid `Final Decision` sections and triggers the single allowed synthesis retry before failing the run.
 - Verified the orchestration, recovery, synthesis, and telemetry layer with dedicated tests and a clean TypeScript compile.

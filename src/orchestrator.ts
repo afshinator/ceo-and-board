@@ -23,6 +23,15 @@ export interface BoardTurnMemberResult {
   error: string | null;
 }
 
+export interface BoardMemberTelemetry {
+  status: BoardMemberExecutionStatus;
+  response_count: number;
+  attempts: number;
+  last_output: string | null;
+  last_error: string | null;
+  last_updated: string;
+}
+
 export interface BoardOrchestratorOptions {
   cwd?: string;
   autoRetry?: boolean;
@@ -83,6 +92,22 @@ function validateMemo(memo: string): string[] {
   }
 
   return issues;
+}
+
+export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, BoardMemberTelemetry> {
+  return Object.fromEntries(
+    Object.entries(turn.memberResults).map(([memberName, memberResult]) => [
+      memberName,
+      {
+        status: memberResult.status,
+        response_count: memberResult.output ? 1 : 0,
+        attempts: memberResult.attempts,
+        last_output: memberResult.output ?? null,
+        last_error: memberResult.error ?? null,
+        last_updated: new Date().toISOString(),
+      },
+    ]),
+  );
 }
 
 export class BoardOrchestrator {
@@ -294,6 +319,7 @@ export class BoardOrchestrator {
         sessionJson.status = 'READY';
         sessionJson.updated_at = new Date().toISOString();
         sessionJson.ceo_conclusion = finalConclusion;
+        sessionJson.telemetry = buildBoardTelemetry(turn);
 
         await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
         return memo;
@@ -309,6 +335,7 @@ export class BoardOrchestrator {
         sessionJson.updated_at = new Date().toISOString();
         sessionJson.ceo_conclusion = finalConclusion;
         sessionJson.last_error = validationErrors.join('; ');
+        sessionJson.telemetry = buildBoardTelemetry(turn);
 
         await writeFile(run.memoPath, memo, 'utf8');
         await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
