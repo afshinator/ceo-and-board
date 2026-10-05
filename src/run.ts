@@ -232,7 +232,30 @@ export async function markForcedClose(
   const sessionPath = join(run.sessionPath, 'session.json');
   const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
 
+  sessionJson.lifecycle_state = 'FINAL_CLOSING';
   sessionJson.round_state = 'FORCED_CLOSE_PENDING';
+  sessionJson.final_close_reason = reason;
+  sessionJson.forced_close = {
+    active: true,
+    reason,
+    voluntary_close_allowed: false,
+  };
+  sessionJson.updated_at = new Date().toISOString();
+
+  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+}
+
+export async function finalizeForcedClose(
+  run: RunSession,
+  reason: ForcedCloseReason,
+): Promise<void> {
+  const sessionPath = join(run.sessionPath, 'session.json');
+  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+  sessionJson.status = 'READY';
+  sessionJson.lifecycle_state = 'FINAL_CLOSING';
+  sessionJson.round_state = 'FINAL_CLOSING';
+  sessionJson.final_close_reason = reason;
   sessionJson.forced_close = {
     active: true,
     reason,

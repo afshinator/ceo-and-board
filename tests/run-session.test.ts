@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
-import { acquireProjectLock, createRun, evaluateConstraintState, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
+import { acquireProjectLock, createRun, evaluateConstraintState, finalizeForcedClose, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
 
 describe('run/session lifecycle', () => {
   it('creates the run directory tree and session checkpoint', async () => {
@@ -124,6 +124,30 @@ describe('run/session lifecycle', () => {
     expect(budgetClose.forcedClose).toBe(true);
     expect(budgetClose.reason).toBe('max_budget');
     expect(budgetClose.voluntaryCloseAllowed).toBe(false);
+  });
+
+  it('transitions a forced-close run into the final-closing lifecycle', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-final-close-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'forced-close-review',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue', 'Contrarian'],
+      });
+
+      await markForcedClose(run, 'max_budget');
+      await finalizeForcedClose(run, 'max_budget');
+
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+      expect(sessionJson.forced_close.active).toBe(true);
+      expect(sessionJson.forced_close.reason).toBe('max_budget');
+      expect(sessionJson.lifecycle_state).toBe('FINAL_CLOSING');
+      expect(sessionJson.round_state).toBe('FINAL_CLOSING');
+      expect(sessionJson.final_close_reason).toBe('max_budget');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('acquires a project lock and rejects a second live owner', async () => {
