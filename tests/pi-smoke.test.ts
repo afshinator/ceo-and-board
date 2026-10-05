@@ -9,6 +9,9 @@ import { BoardOrchestrator } from '../src/orchestrator.js';
 import { createRun } from '../src/run.js';
 
 const runRealPiSmoke = process.env.CEO_BOARD_REAL_PI_SMOKE === '1';
+// CEO_BOARD_PI_MODEL is a test-only override. Production model authority is each
+// agent definition's frontmatter `model` field; the smoke has no agent files, so
+// the model is injected directly into the test factory.
 const smokeModel = process.env.CEO_BOARD_PI_MODEL;
 
 describe.skipIf(!runRealPiSmoke)('real Pi RPC smoke', () => {

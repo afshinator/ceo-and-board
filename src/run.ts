@@ -3,6 +3,7 @@ import { appendFile, copyFile, readFile, mkdir, open, rename, rm, stat, writeFil
 import { basename, dirname, join } from 'node:path';
 
 import { loadConfig, resolveAgentPath } from './config.js';
+import { loadAgentDefinition } from './agents.js';
 
 export interface LockOwnership {
   owner: string;
@@ -18,6 +19,7 @@ export interface CreateRunOptions {
   briefName: string;
   briefContent: string;
   boardMembers?: string[];
+  boardMemberPaths?: Record<string, string>;
   constraints?: {
     min_time_minutes: number;
     max_time_minutes: number;
@@ -64,6 +66,9 @@ export interface RunSession {
   memoPath: string;
   lockPath: string;
   board: Record<string, Record<string, string>>;
+  boardAgentPaths: Record<string, string>;
+  boardModels: Record<string, string>;
+  ceoModel?: string;
 }
 
 const ROOT_RUNTIME_DIR = '.pi/ceo-agents';
@@ -232,6 +237,14 @@ export async function createRun(
     brief: options.briefName,
   });
 
+  const boardModels: Record<string, string> = {};
+  if (options.boardMemberPaths) {
+    for (const [memberName, agentPath] of Object.entries(options.boardMemberPaths)) {
+      const agent = await loadAgentDefinition(agentPath);
+      boardModels[memberName] = agent.frontmatter.model;
+    }
+  }
+
   return {
     sessionId,
     sessionName,
@@ -239,6 +252,8 @@ export async function createRun(
     memoPath,
     lockPath: join(projectRoot, ROOT_RUNTIME_DIR, '.active-run.lock'),
     board,
+    boardAgentPaths: options.boardMemberPaths ?? {},
+    boardModels,
   };
 }
 

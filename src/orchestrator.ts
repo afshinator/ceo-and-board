@@ -238,6 +238,7 @@ async function executeBoardMember(
     sessionDir,
     cwd: workspacePath,
     autoRetry: false,
+    ...(run.boardModels[memberName] ? { model: run.boardModels[memberName] } : {}),
   };
   const maxAttempts = options.autoRetry ? 2 : 1;
   let lastError = 'The member did not complete.';
@@ -414,6 +415,7 @@ export class BoardOrchestrator {
       sessionDir: join(run.sessionPath, 'pi-sessions', 'ceo'),
       cwd: this.options.cwd ?? process.cwd(),
       autoRetry: false,
+      ...(run.ceoModel ? { model: run.ceoModel } : {}),
     };
 
     await captureRunSnapshot(run, { ceoPrompt: synthesisPrompt });
@@ -937,6 +939,8 @@ class DefaultPiAgentClientFactory implements PiAgentClientFactory {
       agentName: config.agentName,
       piSessionId: config.sessionId,
       cwd: config.cwd,
+      sessionDir: config.sessionDir,
+      ...(config.model ? { model: config.model } : {}),
     });
   }
 }

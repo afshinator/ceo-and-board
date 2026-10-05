@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionToolContext } from
 import { Type } from 'typebox';
 
 import { discoverBriefs, validateBrief } from '../briefs.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, resolveAgentPath } from '../config.js';
 import { BoardOrchestrator } from '../orchestrator.js';
 import type { PiAgentClientFactory } from '../pi.js';
 import { acquireProjectLock, createRun, type ProjectLock, type RunSession } from '../run.js';
@@ -109,6 +109,10 @@ export function registerCeoBoardExtension(
             briefName: brief.name,
             briefContent,
             boardMembers: config.board.map((member) => member.name),
+            boardMemberPaths: Object.fromEntries(config.board.map((member) => [
+              member.name,
+              resolveAgentPath(member.path, config, projectRoot),
+            ])),
             constraints: config.meeting.constraints,
           });
           await lock.associateRun(run);

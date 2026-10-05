@@ -14,11 +14,16 @@ export const SkillEntrySchema = z.object({
   'use-when': z.string().optional(),
 });
 
+export interface PromptProvenance {
+  frontmatter: 'recovered' | 'reconstructed' | 'invalid';
+  body: 'recovered' | 'partially-recovered' | 'reconstructed';
+}
+
 export const AgentFrontmatterSchema = z.object({
   name: z.string(),
   expertise: z.array(ExpertiseEntrySchema).optional(),
   skills: z.array(SkillEntrySchema).optional(),
-  model: z.string().optional(),
+  model: z.string().min(1, 'Agent definitions must declare a model.'),
   domain: z.array(z.string()).optional(),
 });
 
@@ -28,6 +33,7 @@ export interface AgentDefinition {
   frontmatter: AgentFrontmatter;
   body: string;
   sourcePath: string;
+  provenance: PromptProvenance;
 }
 
 export async function loadAgentDefinition(filePath: string): Promise<AgentDefinition> {
@@ -49,6 +55,7 @@ export async function loadAgentDefinition(filePath: string): Promise<AgentDefini
     frontmatter: AgentFrontmatterSchema.parse(parsed),
     body: body ?? '',
     sourcePath: filePath,
+    provenance: { frontmatter: 'recovered', body: 'recovered' },
   };
 }
 

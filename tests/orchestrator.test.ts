@@ -908,6 +908,7 @@ describe('board orchestrator', () => {
         briefName: 'model-wiring',
         briefContent: '# Brief\n\n## Situation\nTest',
         boardMembers: ['Revenue'],
+        boardMemberPaths: { Revenue: join(projectRoot, 'agents', 'revenue.md') },
       });
       const capturedConfigs: Array<Record<string, unknown>> = [];
       const orchestrator = new BoardOrchestrator({

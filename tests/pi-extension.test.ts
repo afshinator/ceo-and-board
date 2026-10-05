@@ -33,6 +33,18 @@ describe('Pi CEO–Board extension', () => {
       '  - name: Contrarian',
       '    path: contrarian.md',
     ].join('\n'), 'utf8');
+    await import('node:fs/promises').then(({ mkdir }) => mkdir(join(projectRoot, '.pi', 'ceo-agents', 'agents'), { recursive: true }));
+    const agentFrontmatter = (name: string) => [
+      '---',
+      `name: ${name.toLowerCase()}`,
+      'model: test/provider-model',
+      '---',
+      '',
+      '## Purpose',
+      `Assess as ${name}.`,
+    ].join('\n');
+    await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'revenue.md'), agentFrontmatter('Revenue'), 'utf8');
+    await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'contrarian.md'), agentFrontmatter('Contrarian'), 'utf8');
     await writeFile(briefPath, [
       '# Acquisition decision',
       '',

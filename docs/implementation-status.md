@@ -160,7 +160,8 @@ The [implementation-1.4](implementation-1.4.md) corrective plan is in execution.
 - Phase 0 complete: negative-test backlog N1–N8 written and confirmed RED (15 failing tests, 86 passing).
 - B1 complete: Vitest upgraded to 5.0.3, Zod to 4.6.5. No API breakage; the suite runs clean apart from the intended N-series failures. Pi remains 1.0.2 per the v1.4 baseline.
 - B2 complete: the documented app entrypoint [apps/ceo/extensions/ceo-and-board.ts](../apps/ceo/extensions/ceo-and-board.ts) now composes `registerCeoBoardExtension` (commands/tools) plus the runtime widget, and the double widget registration inside [src/pi/extension.ts](../src/pi/extension.ts) is removed. N7 is green.
-- Conformance checklist status after B2: C1, C2 pass; C3–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
+- B3 complete: agent frontmatter `model` is now required (N2), `createRun` resolves each board member's agent definition and records `boardModels`/`boardAgentPaths` on the run session, `PiAgentStartConfig.model` threads into `RpcPiAgentClient`, and the Pi extension passes resolved agent paths at run creation. The smoke test documents `CEO_BOARD_PI_MODEL` as a test-only override. N2/N8 green; `AgentDefinition` now carries `provenance`.
+- Conformance checklist status after B3: C1, C2, C3 pass; C4–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
 
 ## Decision log
 
