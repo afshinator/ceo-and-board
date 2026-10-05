@@ -3,8 +3,8 @@ import { evaluateConstraintState, type ConstraintEvaluation, type ForcedCloseRea
 export interface MeetingConstraintValues {
   min_time_minutes: number;
   max_time_minutes: number;
-  min_budget: number | string;
-  max_budget: number | string;
+  min_budget: number;
+  max_budget: number;
 }
 
 export interface MeetingConstraintState extends ConstraintEvaluation {

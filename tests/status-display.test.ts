@@ -270,7 +270,7 @@ describe('runtime status display', () => {
     try {
       await mkdir(join(projectRoot, '.pi', 'ceo-agents', 'agents'), { recursive: true });
       await mkdir(join(projectRoot, 'expertise'), { recursive: true });
-      await writeFile(join(projectRoot, 'ceo-and-board-configuration.yaml'), `meeting:\n  constraints:\n    min_time_minutes: 1\n    max_time_minutes: 3\n    min_budget: "$1"\n    max_budget: "$5"\n  editor: "code"\npaths:\n  briefs: .pi/ceo-agents/briefs/\n  deliberations: .pi/ceo-agents/deliberations/\n  memos: .pi/ceo-agents/memos/\n  agents: .pi/ceo-agents/agents/\nboard:\n  - name: Revenue\n    path: .pi/ceo-agents/agents/revenue.md\n    color: "#ff7edb"\n  - name: Contrarian\n    path: .pi/ceo-agents/agents/contrarian.md\n    color: "#ff9e64"\n`, 'utf8');
+      await writeFile(join(projectRoot, 'ceo-and-board-configuration.yaml'), `meeting:\n  constraints:\n    min_time_minutes: 1\n    max_time_minutes: 3\n    min_budget: 1\n    max_budget: 5\n  editor: "code"\npaths:\n  briefs: .pi/ceo-agents/briefs/\n  deliberations: .pi/ceo-agents/deliberations/\n  memos: .pi/ceo-agents/memos/\n  agents: .pi/ceo-agents/agents/\nboard:\n  - name: Revenue\n    path: .pi/ceo-agents/agents/revenue.md\n    color: "#ff7edb"\n  - name: Contrarian\n    path: .pi/ceo-agents/agents/contrarian.md\n    color: "#ff9e64"\n`, 'utf8');
       await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'revenue.md'), '---\nname: Revenue\n---\nYou are Revenue.\n', 'utf8');
       await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'contrarian.md'), '---\nname: Contrarian\n---\nYou are Contrarian.\n', 'utf8');
       await writeFile(join(projectRoot, 'expertise', 'ceo.md'), '---\nname: CEO\n---\nYou are the CEO.\n', 'utf8');

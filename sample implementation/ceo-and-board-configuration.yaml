@@ -12,8 +12,8 @@ meeting:
   constraints:
     min_time_minutes: 1
     max_time_minutes: 3
-    min_budget: "$1"
-    max_budget: "$5"
+    min_budget: 1
+    max_budget: 5
   editor: "code"
 
 paths:

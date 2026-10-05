@@ -4,13 +4,31 @@ import { resolve as resolvePath } from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
 
-export const BudgetValueSchema = z.union([z.number(), z.string()]);
+export const BudgetValueSchema = z.number().finite().nonnegative();
 
 export const MeetingConstraintsSchema = z.object({
   min_time_minutes: z.number(),
   max_time_minutes: z.number(),
   min_budget: BudgetValueSchema,
   max_budget: BudgetValueSchema,
+}).check((ctx) => {
+  const value = ctx.value;
+  if (value.min_time_minutes > value.max_time_minutes) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'min_time_minutes must not exceed max_time_minutes.',
+      path: ['min_time_minutes'],
+      input: value.min_time_minutes,
+    });
+  }
+  if (value.min_budget > value.max_budget) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'min_budget must not exceed max_budget.',
+      path: ['min_budget'],
+      input: value.min_budget,
+    });
+  }
 });
 
 export const BriefSectionConfigSchema = z.object({
@@ -38,7 +56,22 @@ export const CeoBoardConfigSchema = z.object({
   }),
   brief_sections: z.array(BriefSectionConfigSchema).optional(),
   paths: PathsConfigSchema,
-  board: z.array(BoardConfigEntrySchema),
+  board: z.array(BoardConfigEntrySchema).min(1, 'The board must contain at least one member.'),
+}).check((ctx) => {
+  const names = ctx.value.board.map((member) => member.name);
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `Duplicate board member name: ${name}.`,
+        path: ['board'],
+        input: name,
+      });
+      return;
+    }
+    seen.add(name);
+  }
 });
 
 export type CeoBoardConfig = z.infer<typeof CeoBoardConfigSchema>;
