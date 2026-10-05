@@ -1,3 +1,3 @@
-docs/older
-
-
+node_modules
+dist
+.DS_Store
