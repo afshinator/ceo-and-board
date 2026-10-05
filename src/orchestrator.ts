@@ -5,7 +5,7 @@ import YAML from 'yaml';
 import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWorkspace, type ArtifactSnapshot } from './artifacts/visibility.js';
 import { evaluateMeetingConstraints } from './constraints.js';
 import { validateDecisionMemo } from './memo-validator.js';
-import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
+import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentEvent, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
 import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
 import { FINAL_STATEMENT_PROMPT, renderAgentPrompt } from './prompt-renderer.js';
 import { loadAgentDefinition } from './agents.js';
@@ -184,6 +184,45 @@ async function readAcceptedConversation(sessionPath: string): Promise<string> {
   return messages.join('\n\n');
 }
 
+// Installed Pi wire event taxonomy (AgentSessionEvent plus the wrapper's
+// session_start/session_end). File writes and artifact creation arrive as
+// tool_execution_* events (read/write/edit/bash) and entry_appended records;
+// there is no distinct file/artifact event on the wire.
+const MEANINGFUL_ACTIVITY_EVENT_TYPES = new Set([
+  // lifecycle
+  'agent_start',
+  'agent_end',
+  'agent_settled',
+  'turn_start',
+  'turn_end',
+  'queue_update',
+  'compaction_start',
+  'compaction_end',
+  'entry_appended',
+  'session_info_changed',
+  'thinking_level_changed',
+  'auto_retry_start',
+  'auto_retry_end',
+  'summarization_retry_scheduled',
+  'summarization_retry_attempt_start',
+  'summarization_retry_finished',
+  'session_start',
+  'session_end',
+  // message
+  'message_start',
+  'message_update',
+  'message_end',
+  // tool + file/artifact
+  'tool_execution_start',
+  'tool_execution_update',
+  'tool_execution_end',
+  'bash_execution_update',
+]);
+
+function isMeaningfulActivityEvent(event: PiAgentEvent): boolean {
+  return MEANINGFUL_ACTIVITY_EVENT_TYPES.has(event.type);
+}
+
 async function withInactivityWatchdog<T>(
   client: PiAgentClient,
   timeoutMs: number,
@@ -201,7 +240,7 @@ async function withInactivityWatchdog<T>(
     },
   });
   const unsubscribe = client.onEvent((event) => {
-    if (event.type.startsWith('message_') || event.type.startsWith('tool_execution_')) {
+    if (isMeaningfulActivityEvent(event)) {
       watchdog.markActivity();
     }
   });

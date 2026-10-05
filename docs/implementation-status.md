@@ -165,7 +165,8 @@ The [implementation-1.4](implementation-1.4.md) corrective plan is in execution.
 - B5 complete: budgets are numeric-only (Zod 4 `finite().nonnegative()`), `min_time > max_time` and `min_budget > max_budget` rejected via `.check`, empty board and duplicate member names rejected. Sample config and fixtures converted to numeric budgets; the sample's string-union accommodation is removed. N1 green. Recorded decision D2 stands: currency display is presentation-layer.
 - B6 complete: the brief validator rejects duplicate required sections (N3), and supporting sibling file contents are read and appended to the CEO framing request under a Supporting Context block. N3 green; sibling-content flow covered by a new extension test.
 - B7 complete: `CreateRunOptions.paths` drives deliberation/memo directories; the Pi extension passes `config.paths`, and the `.pi/ceo-agents` constant is now only the default. N5 green.
-- Conformance checklist status after B7: C1–C8 pass; C9–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
+- B8 complete: `withInactivityWatchdog` now resets on the full installed Pi wire event taxonomy (lifecycle, message, tool, plus `entry_appended`/`bash_execution_update`) via an exact-type set + `isMeaningfulActivityEvent`. File and artifact activity arrive as `tool_execution_*` and `entry_appended`; there is no distinct file/artifact wire event. N6 rewritten to actual wire types and green, including the negative case (out-of-set type does not reset).
+- Conformance checklist status after B8: C1–C9 pass; C10 passes (A12 re-run after B4, 31.4s); C11/C12 pass. All v1.4 fix milestones B1–B8 are complete.
 
 ## Decision log
 

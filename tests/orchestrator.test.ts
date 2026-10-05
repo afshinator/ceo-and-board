@@ -855,16 +855,77 @@ describe('board orchestrator', () => {
       const turn = orchestrator.runBoardTurn(run, { Revenue: 'Analyze the acquisition case.' });
       await settlingStarted;
       await vi.advanceTimersByTimeAsync(80);
-      handlers.forEach((handler) => handler({ type: 'lifecycle_update' }));
+      handlers.forEach((handler) => handler({ type: 'agent_start' }));
       await vi.advanceTimersByTimeAsync(80);
-      handlers.forEach((handler) => handler({ type: 'file_change', path: 'notes.md' }));
+      handlers.forEach((handler) => handler({ type: 'tool_execution_start', toolName: 'write' }));
       await vi.advanceTimersByTimeAsync(80);
-      handlers.forEach((handler) => handler({ type: 'artifact_created', path: 'artifact.md' }));
+      handlers.forEach((handler) => handler({ type: 'entry_appended' }));
       await vi.advanceTimersByTimeAsync(80);
 
       expect(abortCount).toBe(0);
       releaseSettling?.();
       await expect(turn).resolves.toMatchObject({ outputs: { Revenue: 'Active work completed.' } });
+    } finally {
+      releaseSettling?.();
+      vi.useRealTimers();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not reset the inactivity deadline on events outside the activity taxonomy (implementation-1.4 N6)', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-out-of-set-reset-'));
+    vi.useFakeTimers();
+
+    let beginSettling: (() => void) | undefined;
+    let releaseSettling: (() => void) | undefined;
+    let abortCount = 0;
+    const handlers = new Set<(event: PiAgentEvent) => void>();
+    const settlingStarted = new Promise<void>((resolve) => { beginSettling = resolve; });
+    const run = await createRun(projectRoot, {
+      briefName: 'out-of-set-review',
+      briefContent: '# Brief\n\n## Situation\nEvents outside the taxonomy should not keep the turn alive.',
+      boardMembers: ['Revenue'],
+    });
+    const orchestrator = new BoardOrchestrator({
+      async create(config) {
+        const client: PiAgentClient = {
+          agentName: config.agentName,
+          piSessionId: config.sessionId,
+          async start() { return; },
+          async prompt() { return; },
+          async waitUntilSettled() {
+            beginSettling?.();
+            return new Promise<void>((resolve) => { releaseSettling = resolve; });
+          },
+          async getLastAssistantText() { return 'Active work completed.'; },
+          async getSessionStats() {
+            return { messageCount: 0, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
+          },
+          async setAutoRetry() { return; },
+          async abort() { abortCount += 1; },
+          onEvent(handler) {
+            handlers.add(handler);
+            return () => { handlers.delete(handler); };
+          },
+          isHealthy() { return true; },
+          async close() { return; },
+        };
+        return client;
+      },
+    }, { inactivityTimeoutMs: 100 });
+
+    try {
+      const turn = orchestrator.runBoardTurn(run, { Revenue: 'Analyze the acquisition case.' });
+      await settlingStarted;
+      handlers.forEach((handler) => handler({ type: 'provider_stream_delta' }));
+      await vi.advanceTimersByTimeAsync(120);
+
+      expect(abortCount).toBe(1);
+      await expect(turn).resolves.toMatchObject({
+        memberResults: {
+          Revenue: { status: 'FAILED', error: expect.stringMatching(/inactivity/i) },
+        },
+      });
     } finally {
       releaseSettling?.();
       vi.useRealTimers();
