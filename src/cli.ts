@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { BoardOrchestrator } from './orchestrator.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
-import { renderBoardStatus, summarizePersistedRunStatus } from './status.js';
+import { listPersistedRuns, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
   briefName: string;
@@ -88,12 +88,13 @@ export interface BoardRunCliOptions {
   autoRetry?: boolean;
 }
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string }> {
-  const options: BoardRunCliOptions & { status?: boolean; sessionName?: string } = {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string } | Array<{ sessionName: string; lifecycle: string }>> {
+  const options: BoardRunCliOptions & { status?: boolean; list?: boolean; sessionName?: string } = {
     projectRoot: process.cwd(),
     boardMembers: [],
     autoRetry: true,
     status: false,
+    list: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -134,10 +135,29 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       continue;
     }
 
+    if (token === '--list') {
+      options.list = true;
+      continue;
+    }
+
     if (token === '--no-auto-retry') {
       options.autoRetry = false;
       continue;
     }
+  }
+
+  if (options.list) {
+    const runs = await listPersistedRuns(options.projectRoot ?? process.cwd());
+    const lines = runs.length > 0
+      ? runs.map((run) => `- ${run.sessionName} (${run.lifecycle})`)
+      : ['- No persisted board runs found.'];
+
+    console.log('Persisted runs:');
+    for (const line of lines) {
+      console.log(line);
+    }
+
+    return runs.map((run) => ({ sessionName: run.sessionName, lifecycle: run.lifecycle }));
   }
 
   if (options.status) {

@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
@@ -88,6 +88,56 @@ export async function summarizeBoardStatus(
     failedMembers,
     members,
   };
+}
+
+export type PersistedRunSummary = {
+  sessionId: string;
+  sessionName: string;
+  sessionPath: string;
+  lifecycle: string;
+  createdAt: string;
+};
+
+export async function listPersistedRuns(projectRoot: string): Promise<PersistedRunSummary[]> {
+  const deliberationsDir = join(projectRoot, '.pi', 'ceo-agents', 'deliberations');
+
+  try {
+    const entries = await readdir(deliberationsDir, { withFileTypes: true });
+    const runEntries = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+
+    const summaries: PersistedRunSummary[] = [];
+
+    for (const name of runEntries) {
+      const sessionPath = join(deliberationsDir, name);
+      try {
+        const sessionJson = JSON.parse(await readFile(join(sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+        const directoryStat = await stat(sessionPath);
+
+        summaries.push({
+          sessionId: sessionJson.session_id ?? name,
+          sessionName: sessionJson.session_name ?? name,
+          sessionPath,
+          lifecycle: normalizeLifecycleState(
+            typeof sessionJson.lifecycle_state === 'string'
+              ? sessionJson.lifecycle_state
+              : typeof sessionJson.status === 'string'
+                ? sessionJson.status
+                : 'INITIALIZING',
+          ),
+          createdAt: sessionJson.created_at ?? new Date(directoryStat.mtimeMs).toISOString(),
+        });
+      } catch {
+        // Skip unreadable run directories to keep the listing resilient.
+      }
+    }
+
+    summaries.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    return summaries;
+  } catch {
+    return [];
+  }
 }
 
 export async function summarizePersistedRunStatus(

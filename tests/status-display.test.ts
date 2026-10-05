@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
+import { listPersistedRuns, renderBoardStatus, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -127,6 +127,29 @@ describe('runtime status display', () => {
       expect(persistedStatus.completedMembers).toBe(1);
       expect(persistedStatus.failedMembers).toBe(1);
       expect(renderBoardStatus(persistedStatus)).toContain('CEO_FRAMING');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('lists persisted board runs in reverse chronological order', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-list-status-'));
+
+    try {
+      const first = await createRun(projectRoot, {
+        briefName: 'first-run',
+        briefContent: '# Brief\n\n## Situation\nOne',
+        boardMembers: ['Revenue'],
+      });
+
+      const second = await createRun(projectRoot, {
+        briefName: 'second-run',
+        briefContent: '# Brief\n\n## Situation\nTwo',
+        boardMembers: ['Revenue'],
+      });
+
+      const runs = await listPersistedRuns(projectRoot);
+      expect(runs.map((run) => run.sessionName)).toEqual([second.sessionName, first.sessionName]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

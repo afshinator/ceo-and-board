@@ -95,6 +95,7 @@ Notes:
 - Added a deterministic memo validator that rejects blank or structurally invalid `Final Decision` sections and triggers the single allowed synthesis retry before failing the run.
 - Added a board status summary renderer that exposes the live lifecycle and per-member completion states in a compact, UI-friendly report.
 - The summary now reads the persisted `lifecycle_state` from the run checkpoint and normalizes legacy values, rather than hardcoding the lifecycle to `DELIBERATING`.
+- The CLI can now list persisted runs and display a direct status report from the saved checkpoint directory, allowing a board run to be inspected without re-running the deliberation.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
 - Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.
 - Verified the orchestration, recovery, synthesis, telemetry, runtime-status, and hard-constraint/final-close control layer with dedicated tests and a clean TypeScript compile.
