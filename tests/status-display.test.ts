@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -264,10 +264,17 @@ describe('runtime status display', () => {
     }
   });
 
-  it('captures the brief and rendered member prompts in the run snapshot', async () => {
+  it('captures the brief, rendered prompts, config, and source agent definitions in the run snapshot', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-snapshot-inputs-'));
 
     try {
+      await mkdir(join(projectRoot, '.pi', 'ceo-agents', 'agents'), { recursive: true });
+      await mkdir(join(projectRoot, 'expertise'), { recursive: true });
+      await writeFile(join(projectRoot, 'ceo-and-board-configuration.yaml'), `meeting:\n  constraints:\n    min_time_minutes: 1\n    max_time_minutes: 3\n    min_budget: "$1"\n    max_budget: "$5"\n  editor: "code"\npaths:\n  briefs: .pi/ceo-agents/briefs/\n  deliberations: .pi/ceo-agents/deliberations/\n  memos: .pi/ceo-agents/memos/\n  agents: .pi/ceo-agents/agents/\nboard:\n  - name: Revenue\n    path: .pi/ceo-agents/agents/revenue.md\n    color: "#ff7edb"\n  - name: Contrarian\n    path: .pi/ceo-agents/agents/contrarian.md\n    color: "#ff9e64"\n`, 'utf8');
+      await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'revenue.md'), '---\nname: Revenue\n---\nYou are Revenue.\n', 'utf8');
+      await writeFile(join(projectRoot, '.pi', 'ceo-agents', 'agents', 'contrarian.md'), '---\nname: Contrarian\n---\nYou are Contrarian.\n', 'utf8');
+      await writeFile(join(projectRoot, 'expertise', 'ceo.md'), '---\nname: CEO\n---\nYou are the CEO.\n', 'utf8');
+
       const run = await createRun(projectRoot, {
         briefName: 'snapshot-run',
         briefContent: '# Brief\n\n## Situation\nExport this run and keep the prompt archive.',
@@ -290,6 +297,9 @@ describe('runtime status display', () => {
 
       const snapshotDir = join(run.sessionPath, 'snapshot');
       expect(await readFile(join(snapshotDir, 'brief.md'), 'utf8')).toContain('Export this run and keep the prompt archive.');
+      expect(await readFile(join(snapshotDir, 'ceo-and-board-configuration.yaml'), 'utf8')).toContain('name: Revenue');
+      expect(await readFile(join(snapshotDir, 'ceo.md'), 'utf8')).toContain('You are the CEO.');
+      expect(await readFile(join(snapshotDir, 'agents', 'revenue.md'), 'utf8')).toContain('You are Revenue.');
       expect(await readFile(join(snapshotDir, 'prompts', 'revenue.txt'), 'utf8')).toContain('Analyze the acquisition case and capture the exact prompt used.');
       expect(await readFile(join(snapshotDir, 'prompts', 'contrarian.txt'), 'utf8')).toContain('lower-risk path');
     } finally {

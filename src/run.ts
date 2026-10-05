@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, readFile, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { loadConfig, resolveAgentPath } from './config.js';
+
 export interface LockOwnership {
   owner: string;
   pid?: number;
@@ -169,7 +171,9 @@ export async function captureRunSnapshot(
   const snapshotDir = join(run.sessionPath, 'snapshot');
   await mkdir(snapshotDir, { recursive: true });
   const promptDir = join(snapshotDir, 'prompts');
+  const agentDir = join(snapshotDir, 'agents');
   await mkdir(promptDir, { recursive: true });
+  await mkdir(agentDir, { recursive: true });
 
   const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
   const briefContent = options.briefContent ?? (typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '');
@@ -179,15 +183,49 @@ export async function captureRunSnapshot(
   }
 
   const projectRoot = join(run.sessionPath, '..', '..', '..', '..');
-  const configPath = join(projectRoot, 'ceo-and-board-configuration.yaml');
-  try {
-    await copyFile(configPath, join(snapshotDir, 'ceo-and-board-configuration.yaml'));
-  } catch {
-    // The project may not include a root config file; a snapshot without it is acceptable.
+  const configCandidates = [
+    join(projectRoot, 'ceo-and-board-configuration.yaml'),
+    join(projectRoot, 'sample implementation', 'ceo-and-board-configuration.yaml'),
+    join(projectRoot, '.pi', 'ceo-agents', 'ceo-and-board-configuration.yaml'),
+  ];
+
+  for (const configPath of configCandidates) {
+    try {
+      await copyFile(configPath, join(snapshotDir, 'ceo-and-board-configuration.yaml'));
+      const config = await loadConfig(configPath);
+
+      for (const boardMember of config.board) {
+        const memberName = boardMember.name;
+        const sourcePath = resolveAgentPath(boardMember.path, config, projectRoot);
+        const targetPath = join(agentDir, `${slugify(memberName)}.md`);
+        try {
+          await copyFile(sourcePath, targetPath);
+        } catch {
+          // Ignore missing board agent source files, but preserve the config snapshot.
+        }
+      }
+    } catch {
+      // A config file is optional in the snapshot; some runs may be created without one.
+    }
+  }
+
+  const ceoCandidates = [
+    join(projectRoot, 'expertise', 'ceo.md'),
+    join(projectRoot, 'sample implementation', 'expertise', 'ceo.md'),
+    join(projectRoot, '.pi', 'ceo-agents', 'expertise', 'ceo.md'),
+  ];
+
+  for (const ceoPath of ceoCandidates) {
+    try {
+      await copyFile(ceoPath, join(snapshotDir, 'ceo.md'));
+      break;
+    } catch {
+      // Keep looking for any CEO persona definition.
+    }
   }
 
   for (const [memberName, promptText] of Object.entries(options.promptsByMember ?? {})) {
-    const slug = memberName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'member';
+    const slug = slugify(memberName);
     await writeFile(join(promptDir, `${slug}.txt`), promptText, 'utf8');
   }
 
