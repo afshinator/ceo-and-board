@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
 import { createRun } from '../src/run.js';
-import { listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
+import { cleanupStalePersistedRuns, listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizeBoardStatus, summarizePersistedRunStatus } from '../src/status.js';
 
 describe('runtime status display', () => {
   it('summarizes board state and member telemetry for a live run', async () => {
@@ -225,6 +225,40 @@ describe('runtime status display', () => {
       const summary = await summarizePersistedRunStatus(projectRoot, run.sessionName);
       expect(summary.memoPreview).toContain('Proceed with the strategic pivot');
       expect(renderBoardStatus(summary)).toContain('Proceed with the strategic pivot');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('removes stale persisted runs older than a retention threshold', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-cleanup-'));
+
+    try {
+      const staleRun = await createRun(projectRoot, {
+        briefName: 'stale-run',
+        briefContent: '# Brief\n\n## Situation\nOld',
+        boardMembers: ['Revenue'],
+      });
+
+      const freshRun = await createRun(projectRoot, {
+        briefName: 'fresh-run',
+        briefContent: '# Brief\n\n## Situation\nNew',
+        boardMembers: ['Ops'],
+      });
+
+      const staleSessionPath = join(projectRoot, '.pi', 'ceo-agents', 'deliberations', staleRun.sessionName, 'session.json');
+      const staleSessionJson = JSON.parse(await readFile(staleSessionPath, 'utf8')) as Record<string, any>;
+      staleSessionJson.created_at = new Date(Date.now() - 1000 * 60 * 60 * 24 * 40).toISOString();
+      await writeFile(staleSessionPath, `${JSON.stringify(staleSessionJson, null, 2)}\n`, 'utf8');
+
+      const removed = await cleanupStalePersistedRuns(projectRoot, { maxAgeDays: 30 });
+      expect(removed).toContain(staleRun.sessionName);
+      expect(await listPersistedRuns(projectRoot)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ sessionName: freshRun.sessionName }),
+      ]));
+      expect(await listPersistedRuns(projectRoot)).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ sessionName: staleRun.sessionName }),
+      ]));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

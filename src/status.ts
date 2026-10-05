@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { BoardTurnResult, BoardTurnMemberResult } from './orchestrator.js';
@@ -240,6 +240,33 @@ export async function readPersistedMemo(projectRoot: string, sessionName?: strin
   } catch {
     throw new Error(`No memo file found for session "${selectedRun.sessionName}" at ${memoPath}.`);
   }
+}
+
+export async function cleanupStalePersistedRuns(
+  projectRoot: string,
+  options: { maxAgeDays?: number } = {},
+): Promise<string[]> {
+  const runs = await listPersistedRuns(projectRoot);
+  const maxAgeDays = options.maxAgeDays ?? 30;
+  const cutoffMs = maxAgeDays * 24 * 60 * 60 * 1000;
+  const removed: string[] = [];
+
+  for (const run of runs) {
+    const ageMs = Date.now() - new Date(run.createdAt).getTime();
+    if (ageMs <= cutoffMs) {
+      continue;
+    }
+
+    await rm(run.sessionPath, { recursive: true, force: true });
+    try {
+      await rm(join(projectRoot, '.pi', 'ceo-agents', 'memos', run.sessionName), { recursive: true, force: true });
+    } catch {
+      // The memo directory may not exist yet; ignore cleanup misses.
+    }
+    removed.push(run.sessionName);
+  }
+
+  return removed;
 }
 
 export async function summarizePersistedRunStatus(
