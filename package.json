@@ -14,6 +14,7 @@
     "check": "pnpm run typecheck && pnpm run test"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.2",
     "@types/node": "^24.1.0",
     "remark-parse": "^11.0.0",
     "typescript": "^5.8.3",

@@ -37,11 +37,11 @@ Notes:
 - This milestone is covered by direct tests and passes under the repo’s TypeScript baseline.
 
 #### Pi API contract
-Status: not yet proven, but now formally gated.
+Status: complete and verified.
 Notes:
-- The v1.3 document adds A0, the Pi runtime contract gate.
-- This remains the correct boundary before orchestration code depends on Pi lifecycle or session semantics.
-- The open risk is not whether the design is conceptually sound, but whether the installed Pi package exposes the exact lifecycle and RPC semantics the design assumes.
+- The installed stable package `@earendil-works/pi-coding-agent` exposes the expected `RpcClient` runtime contract, including `start()`, `onEvent()`, `prompt()`, `waitForIdle()`, `getLastAssistantText()`, and `setAutoRetry()`.
+- The app-owned adapter boundary is now implemented in the repo and is validated against the actual runtime API rather than assumptions from the design docs alone.
+- This resolves the A0 gate: orchestration can now depend on the verified lifecycle and event semantics without building on an unproven abstraction.
 
 #### Process/session model
 Status: resolved in the design.
@@ -57,11 +57,11 @@ Notes:
 - This avoids the earlier confusion in v1.2 where they were presented as if they were directly recovered from the reference evidence.
 
 #### Implementation readiness
-Status: deterministic milestones complete; Pi runtime gate remains the next boundary.
+Status: deterministic milestones complete; Pi runtime adapter is implemented and verified.
 Notes:
 - The config/agent/brief layer and the run/session lock lifecycle are now coded and tested.
-- The next gate is proving the real Pi runtime contract before implementing orchestration, process management, and board-member subprocess logic.
-- This keeps the project moving without building on unverified Pi behavior.
+- The project now has an application-owned Pi adapter boundary around the verified runtime contract, with the required event and settle semantics in place.
+- The next implementation step is board-process orchestration and member-specific execution flow, using the confirmed `RpcClient` boundary rather than unverified assumptions.
 
 ## Verified accomplishments
 
@@ -71,15 +71,17 @@ Notes:
 - Resolved agent path semantics relative to project root and configured agent directories.
 - Parsed YAML frontmatter and extracted runtime variables from the CEO persona definition.
 - Validated real Markdown briefs against the required section structure.
+- Added run/session lifecycle support: project-scoped directories, checkpoint persistence, and lock acquisition with stale-lock recovery.
 - Verified the repo with: `pnpm test && pnpm typecheck`.
-- Pushed the repo to origin successfully after the transient network issue cleared.
+- Implemented the app-owned Pi adapter layer using the actual `RpcClient` runtime contract.
+- Verified the adapter boundary with dedicated tests and a clean TypeScript compile.
+- Committed and pushed the verified work to origin successfully.
 
 ## Open items to track over time
 
-- Verify the actual installed stable Pi package exports and session lifecycle semantics.
-- Confirm the exact onEvent / settle / session-restore behavior used by the runtime.
-- Revisit the design if the installed Pi package differs materially from the assumed process contract.
-- Implement the real Pi adapter boundary and board-process orchestration after A0 is proven.
+- Implement board-process orchestration on top of the verified adapter boundary.
+- Confirm member-level run scoping and private Pi session behavior during actual board execution.
+- Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
 
 ## Decision log
@@ -94,4 +96,4 @@ The design should continue to distinguish between what is evidence-backed and wh
 The config/agent/brief layer can proceed independently of Pi verification, but orchestration should not depend on unverified Pi API behavior.
 
 ### D4
-The next implementation step is to verify the actual Pi adapter contract, then proceed to run/session lifecycle code and board-process management.
+The next implementation step is to build board-process orchestration on top of the verified Pi adapter contract, not to re-open the runtime API gate.
