@@ -97,6 +97,7 @@ Notes:
 - The summary now reads the persisted `lifecycle_state` from the run checkpoint and normalizes legacy values, rather than hardcoding the lifecycle to `DELIBERATING`.
 - The CLI can now list persisted runs and display a direct status report from the saved checkpoint directory, allowing a board run to be inspected without re-running the deliberation.
 - The CLI can also read the persisted CEO memo from the saved run output directory, making the final board recommendation available for inspection without re-running the board or reconstructing the run from logs.
+- The CLI now supports exporting a persisted run snapshot to a portable directory, making the saved `session.json` and memo available for archival or offline inspection without leaving the project’s active runtime tree.
 - The status summary now includes a compact memo preview extracted from the saved final-decision section, so the newest recommendation is visible in the run summary without opening the memo file itself.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
 - Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.

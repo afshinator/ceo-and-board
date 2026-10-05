@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { BoardOrchestrator } from './orchestrator.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
-import { listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
+import { exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
   briefName: string;
@@ -86,9 +86,11 @@ export interface BoardRunCliOptions {
   briefPath?: string;
   boardMembers?: string[];
   autoRetry?: boolean;
+  export?: boolean;
+  exportDir?: string;
 }
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string; memo?: string } | Array<{ sessionName: string; lifecycle: string }>> {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<BoardRunCommandResult | { lifecycle: string; rendered: string; memo?: string; snapshotPath?: string } | Array<{ sessionName: string; lifecycle: string }>> {
   const options: BoardRunCliOptions & { status?: boolean; list?: boolean; memo?: boolean; sessionName?: string } = {
     projectRoot: process.cwd(),
     boardMembers: [],
@@ -96,6 +98,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
     status: false,
     list: false,
     memo: false,
+    export: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -146,6 +149,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       continue;
     }
 
+    if (token === '--export') {
+      options.export = true;
+      continue;
+    }
+
+    if (token === '--export-dir') {
+      options.exportDir = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
     if (token === '--no-auto-retry') {
       options.autoRetry = false;
       continue;
@@ -177,6 +191,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
     const rendered = renderBoardStatus(status);
     console.log(rendered);
     return { lifecycle: status.lifecycle, rendered };
+  }
+
+  if (options.export) {
+    const projectRoot = options.projectRoot ?? process.cwd();
+    const runs = await listPersistedRuns(projectRoot);
+    const selectedRun = options.sessionName
+      ? runs.find((run) => run.sessionName === options.sessionName) ?? runs[0]
+      : runs[0];
+
+    if (!selectedRun) {
+      throw new Error(`No persisted board runs found under ${join(projectRoot, '.pi', 'ceo-agents', 'deliberations')}.`);
+    }
+
+    const exportDir = options.exportDir
+      ? resolve(projectRoot, options.exportDir)
+      : join(projectRoot, 'exports', selectedRun.sessionName);
+    const snapshotPath = await exportPersistedRunSnapshot(projectRoot, selectedRun.sessionName, exportDir);
+
+    console.log(`Exported board snapshot for ${selectedRun.sessionName} to ${snapshotPath}`);
+    return { lifecycle: 'SNAPSHOT', rendered: snapshotPath, snapshotPath };
   }
 
   if (!options.briefName && options.briefPath) {

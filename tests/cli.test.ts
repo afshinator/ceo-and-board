@@ -36,4 +36,39 @@ describe('board CLI runner', () => {
       await import('node:fs/promises').then(({ rm }) => rm(projectRoot, { recursive: true, force: true }));
     }
   });
+
+  it('exports a persisted run snapshot from the CLI', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-cli-export-'));
+
+    try {
+      const created = await runBoardFromBrief(projectRoot, {
+        briefName: 'export-decision',
+        briefContent: '# Brief\n\n## Situation\nThe team needs a decision.\n\n## Recommendation\nWe should proceed with the export plan.',
+        boardMembers: ['Revenue', 'Contrarian'],
+        autoRetry: true,
+        factory: {
+          async create(config) {
+            return new ScriptedPiAgentClient({
+              agentName: config.agentName,
+              piSessionId: config.sessionId,
+            });
+          },
+        },
+      });
+
+      const destination = join(projectRoot, 'exports', 'cli-export');
+      const result = await import('../src/cli.js').then(({ main }) => main([
+        '--project-root', projectRoot,
+        '--session-name', created.run.sessionName,
+        '--export',
+        '--export-dir', destination,
+      ]));
+
+      expect(result).toMatchObject({ lifecycle: 'SNAPSHOT' });
+      expect(await readFile(join(destination, 'session.json'), 'utf8')).toContain('export-decision');
+      expect(await readFile(join(destination, 'memo.md'), 'utf8')).toContain('The board should proceed with the offer.');
+    } finally {
+      await import('node:fs/promises').then(({ rm }) => rm(projectRoot, { recursive: true, force: true }));
+    }
+  });
 });
