@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig } from './pi.js';
@@ -113,6 +113,25 @@ export class BoardOrchestrator {
 
     await mkdir(join(run.sessionPath, 'snapshot'), { recursive: true });
     await writeFile(run.memoPath, memo, 'utf8');
+
+    const sessionPath = join(run.sessionPath, 'session.json');
+    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+    for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
+      const tracked = sessionJson.board[memberName] ?? {};
+      tracked.status = memberResult.healthy ? 'COMPLETED' : 'FAILED';
+      tracked.last_output = memberResult.output ?? null;
+      tracked.last_updated = new Date().toISOString();
+      sessionJson.board[memberName] = tracked;
+    }
+
+    sessionJson.round = Number(sessionJson.round ?? 0) + 1;
+    sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
+    sessionJson.status = 'READY';
+    sessionJson.updated_at = new Date().toISOString();
+    sessionJson.ceo_conclusion = conclusion;
+
+    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
     return memo;
   }
 }

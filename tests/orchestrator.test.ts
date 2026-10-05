@@ -79,8 +79,15 @@ describe('board orchestrator', () => {
 
       const memo = await orchestrator.writeCEOConclusion(run, turn, 'The board should proceed with the offer.');
 
+      const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
+
       expect(memo).toContain('The board should proceed with the offer.');
       expect(await readFile(run.memoPath, 'utf8')).toContain('The board should proceed with the offer.');
+      expect(sessionJson.board.Revenue.status).toBe('COMPLETED');
+      expect(sessionJson.board.Contrarian.status).toBe('COMPLETED');
+      expect(sessionJson.board.Revenue.last_output).toBe('The board should proceed with the offer.');
+      expect(sessionJson.board.Contrarian.last_output).toBe('The final argument is to keep the lower-risk path.');
+      expect(sessionJson.ceo_conclusion).toBe('The board should proceed with the offer.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

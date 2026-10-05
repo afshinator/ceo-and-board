@@ -57,11 +57,12 @@ Notes:
 - This avoids the earlier confusion in v1.2 where they were presented as if they were directly recovered from the reference evidence.
 
 #### Implementation readiness
-Status: deterministic milestones complete; Pi runtime adapter is implemented and verified.
+Status: board orchestration, state persistence, and CEO synthesis are implemented and verified.
 Notes:
-- The config/agent/brief layer and the run/session lock lifecycle are now coded and tested.
-- The project now has an application-owned Pi adapter boundary around the verified runtime contract, with the required event and settle semantics in place.
-- The next implementation step is board-process orchestration and member-specific execution flow, using the confirmed `RpcClient` boundary rather than unverified assumptions.
+- The config/agent/brief layer, run/session lock lifecycle, Pi adapter boundary, and board process orchestration are now coded and tested.
+- The project now includes a board orchestrator that runs each member in its own run-scoped Pi session and records the member outcome back into the session checkpoint.
+- The CEO synthesis step writes the final memo to the run output path and updates the board member telemetry plus `ceo_conclusion` in `session.json` once the board turn has settled.
+- The next implementation step is runtime polish and richer board-level execution semantics, not a new runtime API gate.
 
 ## Verified accomplishments
 
@@ -74,20 +75,23 @@ Notes:
 - Added run/session lifecycle support: project-scoped directories, checkpoint persistence, and lock acquisition with stale-lock recovery.
 - Verified the repo with: `pnpm test && pnpm typecheck`.
 - Implemented the app-owned Pi adapter layer using the actual `RpcClient` runtime contract.
-- Verified the adapter boundary with dedicated tests and a clean TypeScript compile.
+- Added a board orchestrator for member-scoped Pi sessions and board-turn execution.
+- Added the CEO synthesis memo step that writes the final deliberation result to the run memo path and persists member state in the run checkpoint.
+- Verified the orchestration and telemetry layer with dedicated tests and a clean TypeScript compile.
 - Committed and pushed the verified work to origin successfully.
 
 ## Open items to track over time
 
-- Implement board-process orchestration on top of the verified adapter boundary.
-- Confirm member-level run scoping and private Pi session behavior during actual board execution.
+- Validate real board execution against the pinned Pi runtime under longer-lived repeated runs.
+- Confirm member-level run scoping and private Pi session behavior during actual multi-member execution.
+- Add richer retry/failure handling and final memo formatting polish beyond the persisted board-state baseline.
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
 
 ## Decision log
 
 ### D1
-The repo has reached a stable deterministic preflight milestone; the remaining critical blocker is the Pi runtime contract gate before orchestration work is trusted.
+The repo has reached a stable deterministic preflight milestone and the verified Pi runtime contract gate is now closed; orchestration can proceed without re-opening the runtime-risk question.
 
 ### D2
 The design should continue to distinguish between what is evidence-backed and what is a v1 implementation choice.
@@ -96,4 +100,4 @@ The design should continue to distinguish between what is evidence-backed and wh
 The config/agent/brief layer can proceed independently of Pi verification, but orchestration should not depend on unverified Pi API behavior.
 
 ### D4
-The next implementation step is to build board-process orchestration on top of the verified Pi adapter contract, not to re-open the runtime API gate.
+The next implementation step is runtime polish and richer board execution semantics on top of the verified adapter and established orchestration layer.
