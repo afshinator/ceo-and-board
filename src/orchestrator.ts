@@ -298,7 +298,8 @@ export class BoardOrchestrator {
     const sessionPath = join(run.sessionPath, 'session.json');
     const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
     sessionJson.status = 'RUNNING';
-    sessionJson.lifecycle_state = 'CEO_SYNTHESIS';
+    sessionJson.lifecycle_state = 'SYNTHESIS';
+    sessionJson.legacy_lifecycle_state = 'CEO_SYNTHESIS';
     sessionJson.updated_at = new Date().toISOString();
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
 
@@ -373,6 +374,7 @@ export class BoardOrchestrator {
         sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
         sessionJson.status = 'READY';
         sessionJson.lifecycle_state = 'COMPLETED';
+        sessionJson.legacy_lifecycle_state = 'CEO_SYNTHESIS';
         sessionJson.updated_at = new Date().toISOString();
         sessionJson.ceo_conclusion = finalConclusion;
         sessionJson.telemetry = buildBoardTelemetry(turn);
