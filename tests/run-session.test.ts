@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BoardOrchestrator } from '../src/orchestrator.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
-import { acquireProjectLock, createRun, evaluateConstraintState, finalizeForcedClose, InactivityWatchdog, markForcedClose, type ProjectLock } from '../src/run.js';
+import { acquireProjectLock, createRun, evaluateConstraintState, finalizeForcedClose, InactivityWatchdog, markForcedClose, normalizeLifecycleState, type ProjectLock } from '../src/run.js';
 
 describe('run/session lifecycle', () => {
   it('creates the run directory tree and session checkpoint', async () => {
@@ -70,6 +70,8 @@ describe('run/session lifecycle', () => {
       const finalSession = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
       expect(finalSession.lifecycle_state).toBe('COMPLETED');
       expect(finalSession.ceo_conclusion).toBe('The board should proceed with the offer.');
+      expect(normalizeLifecycleState('CEO_SYNTHESIS')).toBe('SYNTHESIS');
+      expect(normalizeLifecycleState('SYNTHESIS')).toBe('SYNTHESIS');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
