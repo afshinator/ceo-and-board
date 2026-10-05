@@ -1,0 +1,628 @@
+# CEO–Board Decision System
+
+## Product Behavior Description
+
+**Version:** 0.5
+**Purpose:** Define what the system does from the user's perspective, independent of the specific implementation technology.
+
+---
+
+## 1. Product Purpose
+
+The CEO–Board Decision System is a one-shot autonomous decision engine.
+
+The user gives the system a structured problem brief and starts a decision session. A CEO agent coordinates a board of specialized agents through multiple rounds of independent analysis, disagreement, challenge, evidence gathering, and deliberation.
+
+The CEO ultimately synthesizes the discussion into a definitive decision memo.
+
+The system is designed to allow a human to hand a difficult question to a group of specialized AI decision-makers and observe their reasoning process without having to manually coordinate the discussion.
+
+It is **not** an ongoing monitoring system and is **not** an interactive chat session in which the user guides the agents while they deliberate.
+
+---
+
+# 2. User Interaction Model
+
+The primary interaction is command-driven.
+
+A typical session begins with a command such as:
+
+`ceo begin`
+
+The user has already prepared the decision brief and configured the board.
+
+Once the session begins:
+
+1. The system validates the brief.
+2. The CEO and board agents are initialized.
+3. The CEO begins the deliberation.
+4. Board members independently analyze questions posed by the CEO.
+5. Their responses and generated artifacts are recorded.
+6. Subsequent rounds allow agents to react to the accumulated discussion.
+7. The CEO determines when deliberation is complete.
+8. The CEO requests final positions when appropriate.
+9. The CEO produces a final decision memo.
+
+The user primarily **observes** the session rather than participating in it.
+
+The user cannot modify the brief, inject new instructions, or redirect the board while a session is actively executing.
+
+---
+
+# 3. The CEO and Board
+
+## 3.1 CEO
+
+The CEO is the coordinating and final decision-making agent.
+
+The CEO:
+
+* interprets the decision brief;
+* determines what questions need to be investigated;
+* broadcasts questions or prompts to the board;
+* reviews board responses;
+* identifies disagreement, missing evidence, contradictions, and weak assumptions;
+* directs subsequent rounds of deliberation;
+* determines when the discussion should close;
+* requests final positions when closing;
+* synthesizes the board's findings;
+* produces the final decision memo.
+
+The CEO has final authority over the synthesis.
+
+There is no formal board vote that determines the outcome.
+
+The final memo may describe where board members agreed or disagreed, but the CEO is responsible for the final recommendation.
+
+---
+
+## 3.2 Board Members
+
+The board consists of configurable specialized agents.
+
+Each board member has:
+
+* a defined role;
+* a system prompt;
+* a model assignment;
+* available skills/tools;
+* a particular domain perspective;
+* persistent private expertise;
+* persistent behavioral observations about interactions with other agents.
+
+Example roles include:
+
+* **Revenue:** emphasizes short-term cash flow and immediate financial consequences.
+* **Compounder:** emphasizes long-term value creation and compounding.
+* **Moonshot:** emphasizes asymmetric opportunities and high-upside possibilities.
+* **Contrarian:** actively challenges assumptions, consensus, and proposed conclusions.
+
+The exact board composition is configurable.
+
+---
+
+## 3.3 Adversarial Specialization
+
+Board members are deliberately differentiated.
+
+Their disagreement comes from their assigned roles, prompts, expertise, and behavioral tendencies rather than from the system dynamically assigning agents to argue predetermined sides.
+
+Agents are expected to:
+
+* challenge assumptions;
+* identify weaknesses in other arguments;
+* surface overlooked alternatives;
+* expose risks;
+* question unsupported claims;
+* defend positions they believe are justified;
+* change their position when evidence warrants it.
+
+The purpose of disagreement is to improve the quality of the eventual CEO synthesis.
+
+---
+
+# 4. Decision Brief
+
+## 4.1 Structured Brief
+
+Every decision session begins with a structured Markdown brief.
+
+The brief contains required sections defined by the system configuration.
+
+The standard brief includes:
+
+* `debrief`
+* `stakes`
+* `constraints`
+* `key questions`
+
+Additional supporting sections may include information such as:
+
+* `business_metrics`
+* `product_overview`
+* other decision-specific context.
+
+The brief may also reference or incorporate supplemental documents.
+
+---
+
+## 4.2 Programmatic Brief Validation
+
+The brief schema is **machine-enforced**.
+
+The required sections are defined in `config.json`.
+
+Before the CEO or any board agent begins deliberation, the harness validates the brief Markdown against the configured required sections.
+
+If one or more required sections are missing:
+
+1. The session does not begin.
+2. Agent deliberation is not started.
+3. The system reports the validation failure.
+4. The user must correct the brief before execution can proceed.
+
+A manually written brief that merely follows the documented format is therefore insufficient; it must satisfy the configured schema validation.
+
+---
+
+## 4.3 Brief Immutability During Execution
+
+Once a session begins, its brief is fixed.
+
+The user cannot modify the brief while the session is running.
+
+Agents may interpret, question, or challenge information contained in the brief, but they do not modify the original decision brief.
+
+---
+
+# 5. Agent Memory and Expertise
+
+## 5.1 Private Persistent Expertise
+
+Each agent has a private persistent expertise/scratchpad file.
+
+The file contains information that the agent has accumulated across sessions, including:
+
+* domain knowledge;
+* useful working notes;
+* lessons from previous decisions;
+* recurring considerations;
+* relevant prior conclusions.
+
+An agent can read and update its own expertise during or after a run.
+
+These updates persist across subsequent sessions.
+
+---
+
+## 5.2 Privacy Between Agents
+
+An agent's private expertise file cannot be directly read by other agents.
+
+Agents learn about each other's thinking only through information explicitly exposed during the deliberation, such as:
+
+* board responses;
+* CEO prompts;
+* shared artifacts;
+* generated diagrams;
+* other information written to the shared conversation or artifact space.
+
+This creates a distinction between:
+
+**Private memory:** what an agent knows about its own expertise and history.
+
+**Shared deliberation:** what agents have explicitly contributed to the current decision.
+
+---
+
+## 5.3 Cross-Agent Behavioral Memory
+
+Agent scratchpads also record observations about the behavior and interaction patterns of other board members.
+
+This can include observations such as:
+
+* recurring disagreements with a particular agent;
+* arguments that repeatedly create friction;
+* tendencies of another agent to challenge particular assumptions;
+* recurring weaknesses or blind spots observed during deliberation;
+* useful patterns in how another agent responds to evidence;
+* historical interaction dynamics across sessions.
+
+These observations are associated with specific board members where appropriate.
+
+This memory persists across sessions and can influence how an agent interprets or responds to future deliberations.
+
+Behavioral memory does not give an agent access to another agent's private scratchpad. It records only what the observing agent itself has learned through prior shared interactions.
+
+---
+
+# 6. Deliberation Process
+
+## 6.1 Parallel Board Responses
+
+The CEO broadcasts a question or prompt to the board.
+
+Board members respond independently and in parallel.
+
+When generating their responses for a round, board members do not see the other board members' responses from that same round.
+
+This preserves independent first-order analysis.
+
+---
+
+## 6.2 Shared Conversation History
+
+Responses and tool activity are recorded in a shared structured conversation log, such as:
+
+`conversation.json`
+
+After each round, the accumulated discussion becomes available to the agents.
+
+Agents are instructed to reread the relevant/full conversation history in subsequent rounds so that they can react to:
+
+* competing arguments;
+* new evidence;
+* challenges from other agents;
+* contradictions;
+* revised positions.
+
+The resulting process alternates between **independent analysis** and **cross-agent reaction**.
+
+---
+
+## 6.3 Multiple Deliberation Rounds
+
+The CEO can conduct multiple rounds of questioning and response.
+
+A round may involve:
+
+1. CEO question or instruction.
+2. Parallel board responses.
+3. Tool use and evidence gathering.
+4. Generation of supporting artifacts.
+5. Recording of outputs.
+6. Subsequent CEO analysis.
+7. Another round addressing unresolved issues.
+
+The CEO decides when the discussion is sufficiently developed to move toward closure, subject to the configured execution limits.
+
+---
+
+# 7. Model Tiering
+
+The system uses differentiated model tiers for different responsibilities.
+
+The CEO coordinator is assigned a **higher-capability model** appropriate for complex synthesis and orchestration.
+
+Board members may use **lower-cost models** that are sufficiently capable for specialized parallel analysis.
+
+For example:
+
+* CEO → Claude Opus-class model
+* Board members → Claude Sonnet-class models
+
+The specific models are configurable.
+
+The purpose of the tiering is to balance:
+
+* synthesis and coordination quality;
+* parallel reasoning capacity;
+* execution cost;
+* overall session efficiency.
+
+Model assignment is therefore part of the board configuration rather than an incidental implementation detail.
+
+---
+
+# 8. Execution Limits
+
+## 8.1 Time and Budget Limits
+
+A session operates within configured execution limits.
+
+Examples may include:
+
+* maximum wall-clock duration;
+* maximum spending/budget;
+* other configured resource limits.
+
+The exact thresholds are configuration values rather than fixed product requirements.
+
+---
+
+## 8.2 Normal Completion
+
+The CEO may naturally determine that the deliberation has reached sufficient depth.
+
+The CEO then transitions the session toward closure and produces the final memo.
+
+A successful completion requires a concrete CEO recommendation.
+
+The recommendation may acknowledge:
+
+* incomplete evidence;
+* assumptions;
+* uncertainty;
+* unresolved disagreement.
+
+Consensus is not required.
+
+---
+
+## 8.3 Harness-Intercepted Hard Limit
+
+Hard limits are enforced by the agent harness rather than merely communicated as advisory information to the CEO.
+
+When a configured time or budget limit is reached, the harness:
+
+1. **Intercepts the active execution loop.**
+2. Stops normal continuation of the deliberation.
+3. Injects a standardized limit-override message to the CEO, such as:
+   `max reached`
+4. Instructs the CEO to stop open-ended debate.
+5. Initiates a structured closing sequence.
+6. Requests **one final closing position from every board member**.
+7. Allows the CEO to synthesize those final positions.
+8. Produces the final decision memo.
+
+The hard limit therefore produces a controlled closure protocol rather than simply terminating the process abruptly.
+
+Whichever configured hard limit is reached first triggers this closure path.
+
+A forced closure does not imply consensus.
+
+---
+
+# 9. Evidence, Tools, and Artifacts
+
+## 9.1 External and Supplemental Information
+
+Agents can work with information supplied in the decision brief and supporting documents.
+
+They may also use configured skills and tools where enabled.
+
+Examples include:
+
+* web research;
+* document analysis;
+* financial calculations;
+* code or data analysis;
+* SVG generation;
+* audio generation;
+* other specialized tools.
+
+The exact tool set is configurable.
+
+Formal academic citation formatting is not required.
+
+Important factual claims in the final memo should nevertheless be attributable to their source context where practical, while agent positions should be identifiable as originating from the relevant board member.
+
+---
+
+## 9.2 In-Flight Persuasion Artifacts
+
+Supporting artifacts are not limited to the final output.
+
+Board members can dynamically generate artifacts **during active deliberation** to support their arguments and persuade the CEO.
+
+For example, a board member may generate an SVG diagram to:
+
+* illustrate an argument;
+* visualize a relationship;
+* expose a risk;
+* compare alternatives;
+* make a quantitative or conceptual point;
+* document its reasoning visually.
+
+These artifacts become part of the deliberation record and can be referenced by subsequent agents and/or the CEO.
+
+The artifacts therefore serve two purposes:
+
+1. **Persuasion:** helping an agent communicate an argument to the CEO.
+2. **Documentation:** preserving how the agent developed and supported its position.
+
+Supporting artifacts may also remain available as part of the final decision archive.
+
+---
+
+## 9.3 Artifact Types
+
+A session may produce:
+
+* SVG diagrams;
+* charts;
+* financial projections;
+* analysis files;
+* other generated documents;
+* optional audio summaries.
+
+Audio generation, such as ElevenLabs-based summaries, is optional and not required for the initial version.
+
+---
+
+# 10. Final Decision Memo
+
+## 10.1 Memo Generation
+
+A successfully completed session produces a Markdown decision memo:
+
+`memo.md`
+
+The memo is written by the CEO.
+
+The system may automatically open the resulting Markdown document after completion.
+
+---
+
+## 10.2 Memo Content
+
+The memo should provide a clear and actionable synthesis of the deliberation.
+
+It should include, as appropriate:
+
+* the decision/problem;
+* the CEO's recommendation;
+* supporting rationale;
+* relevant evidence;
+* important assumptions;
+* options considered;
+* trade-offs;
+* risks;
+* areas of disagreement;
+* significant dissenting positions;
+* next steps.
+
+The CEO must make a concrete recommendation even when evidence is incomplete or board members remain divided.
+
+The memo should make meaningful uncertainty and disagreement visible rather than manufacturing consensus.
+
+---
+
+# 11. Session Records and Archive
+
+Each completed or failed session produces an inspectable record.
+
+The primary artifacts include:
+
+* the original decision brief;
+* `conversation.json`;
+* the final `memo.md`, if generated;
+* agent expertise changes;
+* generated supporting artifacts.
+
+The conversation log preserves the deliberation, tool usage, and relevant agent outputs.
+
+The archive therefore allows the user to inspect how the final decision emerged.
+
+---
+
+# 12. Failure Behavior
+
+If a session fails before completion, the system preserves work already produced.
+
+This includes, where applicable:
+
+* the original brief;
+* `conversation.json` through the point of failure;
+* generated supporting artifacts;
+* agent expertise changes already written;
+* the final memo if it had already been generated.
+
+A failed session is not represented as a successfully completed decision merely because partial work exists.
+
+The preserved artifacts allow the user to determine what happened and potentially diagnose or resume work through a future implementation mechanism.
+
+---
+
+# 13. Replay and Reproducibility
+
+The archive provides enough information to inspect a previous decision process.
+
+A replay or rerun may use:
+
+* the original brief;
+* the original configuration;
+* the recorded conversation;
+* agent expertise;
+* generated artifacts.
+
+However, exact bit-for-bit reproduction is not guaranteed because LLM generation is nondeterministic.
+
+The system's objective is therefore **observability and historical inspection**, not deterministic reproduction.
+
+---
+
+# 14. Configuration
+
+The system is configured through developer-readable files.
+
+A primary configuration file such as:
+
+`config.json`
+
+defines system-level behavior including:
+
+* required brief sections;
+* execution limits;
+* model assignments;
+* board configuration;
+* available tools/skills;
+* other runtime parameters.
+
+Individual board agents have their own Markdown system-prompt files, potentially using front matter for configuration metadata.
+
+Each agent configuration defines its role and behavioral specialization.
+
+A graphical board/configuration UI is not required for the initial version.
+
+---
+
+# 15. User-Visible Functional Areas
+
+The product behavior encompasses several functional areas, although these do not necessarily correspond to separate screens:
+
+1. **Decision Brief**
+
+   * Create/edit the structured problem definition.
+   * Validate required sections before execution.
+
+2. **Board Configuration**
+
+   * Define board members, roles, prompts, models, tools, and expertise.
+
+3. **Session Execution**
+
+   * Start a decision session.
+   * Observe autonomous deliberation.
+
+4. **Deliberation Record**
+
+   * Inspect questions, responses, tool activity, and generated artifacts.
+
+5. **Final Decision**
+
+   * Review the CEO's final memo and recommendation.
+
+6. **Decision Archive**
+
+   * Preserve and inspect previous sessions.
+
+7. **Persistent Agent Expertise**
+
+   * Maintain private agent knowledge and cross-agent behavioral observations across sessions.
+
+---
+
+# 16. Out of Scope
+
+The initial system does not require:
+
+* live user prompting during deliberation;
+* modification of the brief during a running session;
+* modification of the board during a running session;
+* ongoing decision monitoring;
+* automatic execution of recommendations;
+* a formal board vote that overrides the CEO;
+* mandatory consensus;
+* guaranteed deterministic reruns;
+* audio summaries as a required v1 capability;
+* a graphical board configuration UI.
+
+---
+
+# 17. Definition of Success
+
+A successful session transforms a structured decision problem into a clear CEO recommendation supported by a visible deliberation process.
+
+The result should provide:
+
+* a concrete recommendation;
+* supporting reasoning and evidence;
+* consideration of alternatives;
+* explicit trade-offs and risks;
+* meaningful disagreement and dissent;
+* source attribution where appropriate;
+* actionable next steps;
+* an inspectable record of how the decision was reached.
+
+The system succeeds when the user can hand it a difficult question, allow the CEO and board to deliberate autonomously, and receive a decision memo that is both **useful as a decision artifact and inspectable as a decision process**.

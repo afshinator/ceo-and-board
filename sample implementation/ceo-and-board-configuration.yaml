@@ -1,0 +1,44 @@
+# Extracted from the screenshot: "One YAML. Complete Control."
+# The screenshot's side annotations are preserved below as YAML comments.
+# "Time & Budget Guardrails": constrain how long and how much each board
+# meeting can consume.
+# "Where Everything Lives": briefs, deliberations, memos, and agent personas
+# are configurable through the paths below.
+# "Your Custom Board": activate only the roles you need. The screenshot
+# suggests optional roles such as Compounder, Customer Oracle,
+# Market Strategist, and Moonshot.
+
+meeting:
+  constraints:
+    min_time_minutes: 1
+    max_time_minutes: 3
+    min_budget: "$1"
+    max_budget: "$5"
+  editor: "code"
+
+paths:
+  briefs: .pi/ceo-agents/briefs/
+  deliberations: .pi/ceo-agents/deliberations/
+  memos: .pi/ceo-agents/memos/
+  agents: .pi/ceo-agents/agents/
+
+board:
+  - name: Revenue
+    path: .pi/ceo-agents/agents/revenue.md
+    color: "#ff7edb"
+  - name: Product Strategist
+    path: ../product-strategist.md
+    color: "#fede5d"
+  - name: Technical Architect
+    path: ../technical-architect.md
+    color: "#ff6e96"
+  - name: Contrarian
+    path: ../contrarian.md
+    color: "#ff9e64"
+
+# Optional board roles shown commented out in the screenshot.
+# Uncomment and provide the intended persona path/color when activating them.
+# - name: Compounder
+# - name: Customer Oracle
+# - name: Market Strategist
+# - name: Moonshot
