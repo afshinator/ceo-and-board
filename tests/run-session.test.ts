@@ -35,6 +35,46 @@ describe('run/session lifecycle', () => {
     }
   });
 
+  it('creates runs under the configured deliberations and memos paths (implementation-1.4 N5)', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-custom-paths-'));
+
+    try {
+      const configPath = join(projectRoot, 'ceo-and-board-configuration.yaml');
+      await writeFile(configPath, [
+        'meeting:',
+        '  constraints:',
+        '    min_time_minutes: 0',
+        '    max_time_minutes: 60',
+        '    min_budget: 1',
+        '    max_budget: 25',
+        '  editor: code',
+        'paths:',
+        '  briefs: briefs',
+        '  deliberations: runs/deliberations',
+        '  memos: runs/memos',
+        '  agents: agents',
+        'board:',
+        '  - name: Revenue',
+        '    path: revenue.md',
+      ].join('\n'), 'utf8');
+      const { loadConfig } = await import('../src/config.js');
+      const config = await loadConfig(configPath);
+
+      const run = await createRun(projectRoot, {
+        briefName: 'custom-paths',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+        constraints: config.meeting.constraints,
+        paths: config.paths,
+      } as Parameters<typeof createRun>[1]);
+
+      expect(run.sessionPath).toBe(join(projectRoot, 'runs', 'deliberations', run.sessionName));
+      expect(run.memoPath).toBe(join(projectRoot, 'runs', 'memos', run.sessionName, 'memo.md'));
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('creates shared conversation and tool-use logs with the run checkpoint', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-logs-'));
 

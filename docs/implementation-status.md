@@ -49,11 +49,13 @@ Notes:
 - This resolves the A0 gate: orchestration can now depend on the verified lifecycle and event semantics without building on an unproven abstraction.
 
 #### Process/session model
-Status: resolved in the design.
+Status: implemented; one-member real-process lifecycle verified.
 Notes:
-- One active board-member subprocess per run is the design model.
+- One active board-member subprocess per active member per run is the design model.
 - Each subprocess owns one persistent run-scoped private Pi session.
 - The CEO remains in the parent Pi process.
+- The A12 smoke verified one member session across two real turns and a subprocess replacement against the same persisted session.
+- Longer-lived and multi-member real-process verification remains open.
 
 #### Snapshot/checkpoint design
 Status: accepted as v1 architecture choice, not direct evidence.
@@ -80,6 +82,7 @@ Notes:
 - Added `apps/ceo/extensions/ceo-and-board.ts` to mount the runtime widget only in TUI mode. It derives the view from the latest persisted run, polls state while mounted, clears when no run is available, and disposes the timer/widget on session shutdown.
 - The parent Pi extension now registers `/ceo-begin` plus CEO-callable `converse` and `end_deliberation` tools. Begin validates/selects a brief, acquires and associates the project lock, seeds the CEO parent turn with the full brief and constraints, streams round responses back to the CEO, then closes/synthesizes and releases the lock.
 - `BoardOrchestrator` now retains one healthy Pi client per member/session across deliberation rounds and final closing, replaces an unhealthy process against the same persisted session, and exposes `closeRun()` for terminal cleanup from the controller and parent extension.
+- The A12 opt-in real-Pi smoke has passed against Command Code DeepSeek V4 Flash; see the [2026-10-05 A12 smoke report](test-run-2026-10-05-a12-real-pi-smoke.md).
 - The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `FINAL_CLOSING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
 - The runtime lifecycle is intentionally a simplified v1 model: broader conceptual v1.3 states such as `VALIDATING` and `CEO_FRAMING` are not currently represented as active persisted states in the implementation.
 - Added an `InactivityWatchdog` primitive and a `markForcedClose()` checkpoint update so the run persists timeout-driven and max-time/max-budget control state in a durable, observable form.
@@ -132,7 +135,7 @@ Notes:
 - Added host-adapter tests for reading latest checkpoint, conversation, tool activity, and unavailable telemetry into the Pi widget model, plus polling/empty-state/disposal behavior; typechecked the entrypoint against the installed ExtensionAPI.
 - Added a fake-Pi extension integration test covering `/ceo-begin`, brief validation, CEO framing injection, `converse`, `end_deliberation`, memo completion, and project-lock release.
 - Added coverage proving board member Pi clients are reused across multiple CEO rounds and final closing, then closed once at run termination.
-- Added the A12 opt-in full-decision real-Pi smoke harness: selects `CEO_BOARD_PI_MODEL`, executes one board member through two rounds and final closing, verifies a write-tool event/artifact and validated CEO memo, checks session stats, reopens the same member session, and closes all RPC processes cleanly. Normal CI skips this test; it has not been run without explicit model opt-in.
+- Added and executed the A12 opt-in full-decision real-Pi smoke: selects `CEO_BOARD_PI_MODEL`, executes one board member through two rounds and final closing, verifies a write-tool event/artifact and validated CEO memo, checks session stats, reopens the same member session after process replacement, and closes all RPC processes cleanly. On 2026-10-05 it passed against `commandcode/deepseek/deepseek-v4-flash`; the first run exposed a CEO synthesis heading-contamination defect, which was reproduced, fixed, and retested. Normal CI still skips this test.
 - The status summary now includes a compact memo preview extracted from the saved final-decision section, so the newest recommendation is visible in the run summary without opening the memo file itself.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
 - Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.
@@ -147,8 +150,16 @@ Notes:
 - Deeper UI/runtime status polish remains the next constructive phase if the team wants a more interactive board display beyond the compact summary layer.
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
-- Complete real-process A5/A12 verification against a configured Pi model; deterministic coverage proves run-scoped client reuse, same-session replacement arguments, and terminal cleanup, but the provider-backed smoke remains environment-dependent.
-- The CLI controller still supports a supplied round-request sequence for deterministic runs. The credentialed A12 real-Pi smoke harness is implemented but has not been run in this environment.
+- Complete longer-lived and multi-member real-process verification against configured Pi models. The A12 smoke now proves the minimal one-member full-decision path and same-session process replacement, but broader A5-style repeated-run behavior remains open.
+- The CLI controller still supports a supplied round-request sequence for deterministic runs. A12 remains opt-in and excluded from normal CI.
+
+## Implementation v1.4 conformance program
+
+The [implementation-1.4](implementation-1.4.md) corrective plan is in execution. Open fix findings: F1 prompt renderer, F2 agent-defined models, F3 entrypoint composition, F4 config strictness, F5 brief packages, F6 config-driven run paths, F7 watchdog activity taxonomy.
+
+- Phase 0 complete: negative-test backlog N1–N8 written and confirmed RED (15 failing tests, 86 passing).
+- B1 complete: Vitest upgraded to 5.0.3, Zod to 4.6.5. No API breakage; the suite runs clean apart from the intended N-series failures. Pi remains 1.0.2 per the v1.4 baseline.
+- Conformance checklist status after B1: C1 pass; C2–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
 
 ## Decision log
 

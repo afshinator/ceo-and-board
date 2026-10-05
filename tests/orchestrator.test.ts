@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -809,6 +809,123 @@ describe('board orchestrator', () => {
     }
   });
 
+  it('resets the inactivity deadline on lifecycle, file, and artifact activity (implementation-1.4 N6)', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-full-activity-reset-'));
+    vi.useFakeTimers();
+
+    let beginSettling: (() => void) | undefined;
+    let releaseSettling: (() => void) | undefined;
+    let abortCount = 0;
+    const handlers = new Set<(event: PiAgentEvent) => void>();
+    const settlingStarted = new Promise<void>((resolve) => { beginSettling = resolve; });
+    const run = await createRun(projectRoot, {
+      briefName: 'full-activity-review',
+      briefContent: '# Brief\n\n## Situation\nLifecycle, file, and artifact activity should keep the turn alive.',
+      boardMembers: ['Revenue'],
+    });
+    const orchestrator = new BoardOrchestrator({
+      async create(config) {
+        const client: PiAgentClient = {
+          agentName: config.agentName,
+          piSessionId: config.sessionId,
+          async start() { return; },
+          async prompt() { return; },
+          async waitUntilSettled() {
+            beginSettling?.();
+            return new Promise<void>((resolve) => { releaseSettling = resolve; });
+          },
+          async getLastAssistantText() { return 'Active work completed.'; },
+          async getSessionStats() {
+            return { messageCount: 0, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
+          },
+          async setAutoRetry() { return; },
+          async abort() { abortCount += 1; },
+          onEvent(handler) {
+            handlers.add(handler);
+            return () => { handlers.delete(handler); };
+          },
+          isHealthy() { return true; },
+          async close() { return; },
+        };
+        return client;
+      },
+    }, { inactivityTimeoutMs: 100 });
+
+    try {
+      const turn = orchestrator.runBoardTurn(run, { Revenue: 'Analyze the acquisition case.' });
+      await settlingStarted;
+      await vi.advanceTimersByTimeAsync(80);
+      handlers.forEach((handler) => handler({ type: 'lifecycle_update' }));
+      await vi.advanceTimersByTimeAsync(80);
+      handlers.forEach((handler) => handler({ type: 'file_change', path: 'notes.md' }));
+      await vi.advanceTimersByTimeAsync(80);
+      handlers.forEach((handler) => handler({ type: 'artifact_created', path: 'artifact.md' }));
+      await vi.advanceTimersByTimeAsync(80);
+
+      expect(abortCount).toBe(0);
+      releaseSettling?.();
+      await expect(turn).resolves.toMatchObject({ outputs: { Revenue: 'Active work completed.' } });
+    } finally {
+      releaseSettling?.();
+      vi.useRealTimers();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('starts each member subprocess with the model from its agent frontmatter (implementation-1.4 N8)', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-agent-model-'));
+
+    try {
+      await writeFile(join(projectRoot, 'ceo-and-board-configuration.yaml'), [
+        'meeting:',
+        '  constraints:',
+        '    min_time_minutes: 0',
+        '    max_time_minutes: 60',
+        '    min_budget: 1',
+        '    max_budget: 25',
+        '  editor: code',
+        'paths:',
+        '  briefs: briefs',
+        '  deliberations: .pi/ceo-agents/deliberations',
+        '  memos: .pi/ceo-agents/memos',
+        '  agents: agents',
+        'board:',
+        '  - name: Revenue',
+        '    path: revenue.md',
+      ].join('\n'), 'utf8');
+      await mkdir(join(projectRoot, 'agents'), { recursive: true });
+      await writeFile(join(projectRoot, 'agents', 'revenue.md'), [
+        '---',
+        'name: revenue',
+        'model: commandcode/deepseek/deepseek-v4-flash',
+        '---',
+        '',
+        '## Purpose',
+        'Assess revenue impact.',
+      ].join('\n'), 'utf8');
+
+      const run = await createRun(projectRoot, {
+        briefName: 'model-wiring',
+        briefContent: '# Brief\n\n## Situation\nTest',
+        boardMembers: ['Revenue'],
+      });
+      const capturedConfigs: Array<Record<string, unknown>> = [];
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          capturedConfigs.push(config as unknown as Record<string, unknown>);
+          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+
+      await orchestrator.runBoardRound(run, { to: 'all', message: 'Assess the case.' });
+
+      expect(capturedConfigs).toHaveLength(1);
+      expect(capturedConfigs[0].model).toBe('commandcode/deepseek/deepseek-v4-flash');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('persists actual Pi tool starts separately from accepted board messages', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-tool-events-'));
 
@@ -1018,6 +1135,62 @@ describe('board orchestrator', () => {
       expect(ceoPrompts[1]).toMatch(/Final Decision.*non-empty/i);
       expect(memo).toContain('## Final Decision');
       expect(memo).toContain('The board should proceed with the offer.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('asks the CEO for decision text only and retries heading contamination with validator feedback', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-heading-retry-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'heading-retry-review',
+        briefContent: '# Brief\n\n## Situation\nThe CEO response must fit the decision section.',
+        boardMembers: ['Revenue'],
+      });
+      const turn = await new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      }).runBoardTurn(run, { Revenue: 'Analyze the acquisition.' });
+
+      const ceoPrompts: string[] = [];
+      let ceoResponses = 0;
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return {
+            agentName: config.agentName,
+            piSessionId: config.sessionId,
+            async start() { return; },
+            async prompt(prompt: string) { ceoPrompts.push(prompt); },
+            async waitUntilSettled() { return; },
+            async getLastAssistantText() {
+              ceoResponses += 1;
+              return ceoResponses === 1
+                ? '## Final Decision\nProceed.\n\n## Ranked Recommendations\n1. Proceed.'
+                : 'Proceed after confirming integration readiness.';
+            },
+            async getSessionStats() {
+              return { messageCount: ceoResponses, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
+            },
+            async setAutoRetry() { return; },
+            async abort() { return; },
+            onEvent() { return () => {}; },
+            isHealthy() { return true; },
+            async close() { return; },
+          };
+        },
+      }, { autoRetry: true });
+
+      const memo = await orchestrator.writeCEOConclusion(run, turn);
+
+      expect(ceoResponses).toBe(2);
+      expect(ceoPrompts[0]).toMatch(/only the text for the Final Decision section/i);
+      expect(ceoPrompts[0]).toMatch(/do not include.*heading|no Markdown headings/i);
+      expect(ceoPrompts[1]).toMatch(/exactly once/i);
+      expect(memo.match(/^## Final Decision$/gm)).toHaveLength(1);
+      expect(memo).toContain('Proceed after confirming integration readiness.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

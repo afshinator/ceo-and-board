@@ -1,9 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { loadConfig, resolveAgentPath } from '../src/config.js';
+import { loadConfig, CeoBoardConfigSchema, resolveAgentPath } from '../src/config.js';
 import { extractRuntimeVariables, loadAgentDefinition } from '../src/agents.js';
-import { validateBrief } from '../src/briefs.js';
+import { discoverBriefs, validateBrief } from '../src/briefs.js';
 
 describe('config and agent preflight', () => {
   it('loads the canonical project config and resolves board agent paths', async () => {
@@ -67,5 +70,141 @@ describe('config and agent preflight', () => {
 
     expect(validation.ok).toBe(true);
     expect(validation.errors).toEqual([]);
+  });
+});
+
+describe('config strictness negatives (implementation-1.4 N1)', () => {
+  const validConfig = {
+    meeting: {
+      constraints: { min_time_minutes: 1, max_time_minutes: 3, min_budget: 1, max_budget: 5 },
+      editor: 'code',
+    },
+    paths: { briefs: 'briefs', deliberations: 'deliberations', memos: 'memos', agents: 'agents' },
+    board: [{ name: 'Revenue', path: 'revenue.md' }],
+  };
+
+  const withConstraints = (constraints: Record<string, unknown>) => ({
+    ...validConfig,
+    meeting: { ...validConfig.meeting, constraints: { ...validConfig.meeting.constraints, ...constraints } },
+  });
+
+  it('rejects string budget values', () => {
+    expect(() => CeoBoardConfigSchema.parse(withConstraints({ min_budget: '$1' }))).toThrow();
+    expect(() => CeoBoardConfigSchema.parse(withConstraints({ max_budget: '$5' }))).toThrow();
+  });
+
+  it('rejects min_time greater than max_time', () => {
+    expect(() => CeoBoardConfigSchema.parse(withConstraints({ min_time_minutes: 5, max_time_minutes: 3 }))).toThrow();
+  });
+
+  it('rejects min_budget greater than max_budget', () => {
+    expect(() => CeoBoardConfigSchema.parse(withConstraints({ min_budget: 10, max_budget: 5 }))).toThrow();
+  });
+
+  it('rejects an empty board', () => {
+    expect(() => CeoBoardConfigSchema.parse({ ...validConfig, board: [] })).toThrow();
+  });
+
+  it('rejects duplicate board member names', () => {
+    const board = [
+      { name: 'Revenue', path: 'revenue.md' },
+      { name: 'Revenue', path: 'other.md' },
+    ];
+    expect(() => CeoBoardConfigSchema.parse({ ...validConfig, board })).toThrow();
+  });
+});
+
+describe('agent definition negatives (implementation-1.4 N2)', () => {
+  it('rejects an agent definition without a model', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-agent-no-model-'));
+
+    try {
+      const agentPath = join(projectRoot, 'agent.md');
+      await writeFile(agentPath, '---\nname: nomodel\n---\n\n## Purpose\nNo model declared.\n', 'utf8');
+
+      await expect(loadAgentDefinition(agentPath)).rejects.toThrow(/model/i);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects malformed expertise entries', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-agent-bad-expertise-'));
+
+    try {
+      const agentPath = join(projectRoot, 'agent.md');
+      await writeFile(agentPath, '---\nname: bad\nmodel: test/model\nexpertise:\n  - use-when: always\n---\n\nBody.\n', 'utf8');
+
+      await expect(loadAgentDefinition(agentPath)).rejects.toThrow();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes prompt provenance for the recovered CEO source', async () => {
+    const agentPath = decodeURIComponent(
+      new URL('../sample implementation/expertise/ceo.md', import.meta.url).pathname,
+    );
+    const agent = await loadAgentDefinition(agentPath);
+
+    expect(agent.provenance).toMatchObject({ frontmatter: 'recovered' });
+  });
+});
+
+describe('brief validation negatives (implementation-1.4 N3)', () => {
+  const requiredSections = [
+    { section: 'Situation' },
+    { section: 'Stakes' },
+    { section: 'Constraints' },
+    { section: 'Key Question' },
+  ];
+
+  const fullBrief = [
+    '# Brief',
+    '## Situation',
+    'State.',
+    '## Stakes',
+    'Risk.',
+    '## Constraints',
+    'Limits.',
+    '## Key Question',
+    'Proceed?',
+  ].join('\n\n');
+
+  for (const missing of ['Situation', 'Stakes', 'Constraints', 'Key Question']) {
+    it(`rejects a brief missing ${missing}`, () => {
+      const brief = fullBrief.replace(new RegExp(`## ${missing}\\n\\n[^#]+`), '');
+      const validation = validateBrief(brief, requiredSections);
+
+      expect(validation.ok).toBe(false);
+      expect(validation.errors.join('; ')).toContain(missing);
+    });
+  }
+
+  it('rejects a duplicate required section', () => {
+    const validation = validateBrief(`${fullBrief}\n\n## Situation\n\nDuplicated.`, requiredSections);
+
+    expect(validation.ok).toBe(false);
+    expect(validation.errors.join('; ')).toMatch(/duplicate.*Situation/i);
+  });
+
+  it('ignores non-directory entries and directories without brief.md during discovery', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-brief-discovery-'));
+
+    try {
+      const briefsDir = join(projectRoot, 'briefs');
+      await mkdir(join(briefsDir, 'valid-package'), { recursive: true });
+      await mkdir(join(briefsDir, 'not-a-package'), { recursive: true });
+      await writeFile(join(briefsDir, 'flat-file.md'), '# Flat', 'utf8');
+      await writeFile(join(briefsDir, 'valid-package', 'brief.md'), fullBrief, 'utf8');
+      await writeFile(join(briefsDir, 'valid-package', 'context.txt'), 'context', 'utf8');
+
+      const discovered = await discoverBriefs(briefsDir);
+
+      expect(discovered.map((brief) => brief.name)).toEqual(['valid-package']);
+      expect(discovered[0].supportingFiles).toEqual(['context.txt']);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -405,6 +405,7 @@ export class BoardOrchestrator {
       ...synthesisInputs,
       '',
       'Provide a concise but reasoned final decision and recommendation for the run.',
+      'Return only the text for the Final Decision section. Do not include the "Final Decision" heading, any other Markdown headings, or the rest of the memo. The harness creates and validates all memo headings.',
     ].filter((line) => line !== undefined).join('\n');
 
     const config: PiAgentStartConfig = {
