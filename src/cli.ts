@@ -1,10 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { BoardOrchestrator } from './orchestrator.js';
+import { runBoardLifecycle } from './controller.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
+import { loadConfig } from './config.js';
 import { exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
@@ -14,31 +16,13 @@ export interface RunBoardFromBriefOptions {
   autoRetry?: boolean;
   cwd?: string;
   factory?: PiAgentClientFactory;
+  roundMessages?: string[];
 }
 
 export interface BoardRunCommandResult {
   run: RunSession;
   memo: string;
   status: 'COMPLETED';
-}
-
-function buildMemberPrompts(briefName: string, briefContent: string, boardMembers: string[]): Record<string, string> {
-  return Object.fromEntries(
-    boardMembers.map((memberName) => [
-      memberName,
-      [
-        `You are ${memberName}.`,
-        '',
-        `Brief: ${briefName}`,
-        '',
-        'Review the background and provide a concise recommendation.',
-        '',
-        '---',
-        '',
-        briefContent,
-      ].join('\n'),
-    ]),
-  );
 }
 
 export async function runBoardFromBrief(
@@ -51,10 +35,22 @@ export async function runBoardFromBrief(
   const lock = await acquireProjectLock(resolvedRoot, { owner: 'ceo-board-cli' });
 
   try {
+    let constraints: Awaited<ReturnType<typeof loadConfig>>['meeting']['constraints'] | undefined;
+    const configPath = join(resolvedRoot, 'ceo-and-board-configuration.yaml');
+    try {
+      await access(configPath);
+      constraints = (await loadConfig(configPath)).meeting.constraints;
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
     const run = await createRun(resolvedRoot, {
       briefName: options.briefName,
       briefContent: options.briefContent,
       boardMembers,
+      constraints,
     });
     await lock.associateRun(run);
 
@@ -63,17 +59,16 @@ export async function runBoardFromBrief(
       autoRetry: options.autoRetry ?? true,
     });
 
-    const turn = await orchestrator.runBoardTurn(run, buildMemberPrompts(
-      options.briefName,
-      options.briefContent,
-      boardMembers,
-    ));
-
-    const memo = await orchestrator.writeCEOConclusion(run, turn);
+    const roundMessages = options.roundMessages?.length
+      ? options.roundMessages
+      : ['Review the brief and provide an initial recommendation.'];
+    const lifecycle = await runBoardLifecycle(run, orchestrator, {
+      roundRequests: roundMessages.map((message) => ({ to: 'all', message })),
+    });
 
     return {
       run,
-      memo,
+      memo: lifecycle.memo,
       status: 'COMPLETED',
     };
   } finally {
@@ -86,6 +81,7 @@ export interface BoardRunCliOptions {
   briefName?: string;
   briefPath?: string;
   boardMembers?: string[];
+  roundMessages?: string[];
   autoRetry?: boolean;
   export?: boolean;
   exportDir?: string;
@@ -127,6 +123,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
 
     if (token === '--member') {
       options.boardMembers = [...(options.boardMembers ?? []), argv[index + 1]];
+      index += 1;
+      continue;
+    }
+
+    if (token === '--round-message') {
+      options.roundMessages = [...(options.roundMessages ?? []), argv[index + 1] ?? ''];
       index += 1;
       continue;
     }
@@ -263,6 +265,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
     briefContent,
     boardMembers: options.boardMembers && options.boardMembers.length > 0 ? options.boardMembers : ['Revenue', 'Contrarian'],
     autoRetry: options.autoRetry,
+    roundMessages: options.roundMessages,
   });
 
   console.log(`Board run ${result.run.sessionId} completed.`);

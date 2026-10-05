@@ -18,6 +18,12 @@ export interface CreateRunOptions {
   briefName: string;
   briefContent: string;
   boardMembers?: string[];
+  constraints?: {
+    min_time_minutes: number;
+    max_time_minutes: number;
+    min_budget: number | string;
+    max_budget: number | string;
+  };
 }
 
 export type ForcedCloseReason = 'max_time' | 'max_budget';
@@ -200,6 +206,13 @@ export async function createRun(
     lifecycle_state: 'INITIALIZING' as RunLifecycleState,
     round: 0,
     round_state: 'IDLE',
+    total_cost: 0,
+    constraints: options.constraints ?? {
+      min_time_minutes: 0,
+      max_time_minutes: Number.MAX_SAFE_INTEGER,
+      min_budget: 0,
+      max_budget: Number.MAX_SAFE_INTEGER,
+    },
     forced_close: {
       active: false,
       reason: null,

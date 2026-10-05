@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import YAML from 'yaml';
 import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWorkspace, type ArtifactSnapshot } from './artifacts/visibility.js';
+import { evaluateMeetingConstraints } from './constraints.js';
+import { validateDecisionMemo } from './memo-validator.js';
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
 import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
 
@@ -67,6 +70,11 @@ export interface BoardOrchestratorOptions {
   inactivityTimeoutMs?: number;
 }
 
+export const FINAL_STATEMENT_PROMPT = [
+  'Provide one final board position.',
+  'State your final position, strongest supporting reason, and strongest remaining concern or condition.',
+].join('\n');
+
 function recordToolUse(client: PiAgentClient, sessionPath: string): {
   dispose(): void;
   flush(): Promise<void>;
@@ -114,6 +122,34 @@ function calculateUsageDelta(before: PiSessionStats | undefined, after: PiSessio
       ? contextUsage.contextWindow - contextUsage.tokens
       : null,
   };
+}
+
+function currentConstraintState(sessionJson: Record<string, any>) {
+  const constraints = sessionJson.constraints ?? {
+    min_time_minutes: 0,
+    max_time_minutes: Number.MAX_SAFE_INTEGER,
+    min_budget: 0,
+    max_budget: Number.MAX_SAFE_INTEGER,
+  };
+  return evaluateMeetingConstraints({
+    createdAt: sessionJson.created_at,
+    constraints,
+    totalBudget: Number(sessionJson.total_cost ?? 0),
+  });
+}
+
+function persistForcedCloseIfReached(sessionJson: Record<string, any>): void {
+  const state = currentConstraintState(sessionJson);
+  if (state.forcedClose) {
+    sessionJson.forced_close = {
+      active: true,
+      reason: state.reason,
+      voluntary_close_allowed: false,
+    };
+    sessionJson.final_close_reason = state.reason;
+    sessionJson.lifecycle_state = 'FINAL_CLOSING';
+    sessionJson.round_state = 'FORCED_CLOSE_PENDING';
+  }
 }
 
 async function readSessionStatsIfAvailable(client: PiAgentClient): Promise<PiSessionStats | undefined> {
@@ -289,55 +325,6 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '') || 'member';
 }
 
-const REQUIRED_MEMO_HEADINGS = [
-  '# Board Memo',
-  '## Final Decision',
-  '## Ranked Recommendations',
-  '## Decision Map',
-  '## Board Stances',
-  '## Tensions & Dissent',
-  '## Trade-offs & Risks',
-  '## Next Actions',
-  '## Deliberation Summary',
-];
-
-function validateMemo(memo: string): string[] {
-  const normalized = memo.replace(/\r/g, '');
-  const issues: string[] = [];
-
-  for (const heading of REQUIRED_MEMO_HEADINGS) {
-    if (!normalized.includes(heading)) {
-      issues.push(`missing required heading: ${heading}`);
-    }
-  }
-
-  let inFinalDecision = false;
-  const finalDecisionLines: string[] = [];
-
-  for (const line of normalized.split('\n')) {
-    if (line.startsWith('## ')) {
-      if (line === '## Final Decision') {
-        inFinalDecision = true;
-        continue;
-      }
-
-      if (inFinalDecision) {
-        break;
-      }
-    }
-
-    if (inFinalDecision) {
-      finalDecisionLines.push(line);
-    }
-  }
-
-  if (finalDecisionLines.join('\n').trim().length === 0) {
-    issues.push('missing non-empty Final Decision section');
-  }
-
-  return issues;
-}
-
 export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, BoardMemberTelemetry> {
   return Object.fromEntries(
     Object.entries(turn.memberResults).map(([memberName, memberResult]) => [
@@ -370,14 +357,32 @@ export class BoardOrchestrator {
     turn: BoardTurnResult,
     prompt?: string,
   ): Promise<string> {
-    const synthesisPrompt = prompt ?? [
-      'You are the CEO consolidating the board discussion into one decision.',
+    const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+    const finalStatements = sessionJson.final_statements ?? {};
+    const boardMembers = Object.keys(run.board);
+    const synthesisOrder = [
+      ...boardMembers.filter((memberName) => memberName.toLowerCase() !== 'contrarian'),
+      ...boardMembers.filter((memberName) => memberName.toLowerCase() === 'contrarian'),
+    ];
+    const synthesisInputs = synthesisOrder.map((memberName) => {
+      const statement = finalStatements[memberName];
+      if (typeof statement === 'string' && statement.trim()) {
+        return `${memberName}: ${statement}`;
+      }
+      if (sessionJson.board?.[memberName]?.status === 'UNAVAILABLE') {
+        return `${memberName}: unavailable; no final statement was provided.`;
+      }
+      return `${memberName}: ${turn.outputs[memberName] ?? 'No accepted statement recorded.'}`;
+    });
+    const synthesisPrompt = [
+      prompt,
+      prompt ? '' : 'You are the CEO consolidating the board discussion into one decision.',
       '',
-      'Board member outputs:',
-      ...Object.entries(turn.outputs).map(([memberName, output]) => `${memberName}: ${output ?? 'No output recorded.'}`),
+      'Accepted final board statements:',
+      ...synthesisInputs,
       '',
       'Provide a concise but reasoned final decision and recommendation for the run.',
-    ].join('\n');
+    ].filter((line) => line !== undefined).join('\n');
 
     const config: PiAgentStartConfig = {
       agentName: 'CEO',
@@ -391,6 +396,7 @@ export class BoardOrchestrator {
 
     const client = await this.clientFactory.create(config);
     const toolUseRecorder = recordToolUse(client, run.sessionPath);
+    let synthesisCostDelta = 0;
     try {
       await client.start(config);
       await client.setAutoRetry(false);
@@ -398,11 +404,24 @@ export class BoardOrchestrator {
         client,
         this.options.inactivityTimeoutMs ?? 90_000,
         async () => {
+          const statsBefore = await readSessionStatsIfAvailable(client);
           await client.prompt(synthesisPrompt);
           await client.waitUntilSettled();
+          const statsAfter = await readSessionStatsIfAvailable(client);
+          if (statsBefore?.cost !== undefined && statsAfter?.cost !== undefined) {
+            synthesisCostDelta = statsAfter.cost - statsBefore.cost;
+          }
         },
       );
       await toolUseRecorder.flush();
+
+      if (synthesisCostDelta !== 0) {
+        const sessionPath = join(run.sessionPath, 'session.json');
+        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+        sessionJson.total_cost = Number(sessionJson.total_cost ?? 0) + synthesisCostDelta;
+        sessionJson.updated_at = new Date().toISOString();
+        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+      }
 
       const conclusion = await client.getLastAssistantText();
       return (conclusion ?? '').trim();
@@ -444,6 +463,11 @@ export class BoardOrchestrator {
 
     const sessionPath = join(run.sessionPath, 'session.json');
     const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    persistForcedCloseIfReached(sessionJson);
+    if (sessionJson.forced_close?.active) {
+      await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+      throw new Error(`A forced close is active (${sessionJson.forced_close.reason}); no further board round is allowed.`);
+    }
     const priorConversation = await readAcceptedConversation(run.sessionPath);
     const participantStatuses: BoardTurnResult['participantStatuses'] = {};
     const availableMembers: string[] = [];
@@ -503,6 +527,10 @@ export class BoardOrchestrator {
     latestSessionJson.board = sessionJson.board;
     latestSessionJson.round = Number(latestSessionJson.round ?? 0) + 1;
     latestSessionJson.round_state = 'IDLE';
+    persistForcedCloseIfReached(latestSessionJson);
+    if (!latestSessionJson.forced_close?.active) {
+      latestSessionJson.round_state = 'IDLE';
+    }
     latestSessionJson.updated_at = new Date().toISOString();
     await writeFile(sessionPath, `${JSON.stringify(latestSessionJson, null, 2)}\n`, 'utf8');
 
@@ -514,13 +542,16 @@ export class BoardOrchestrator {
         : { member: memberName, status };
     });
     const forcedClose = latestSessionJson.forced_close ?? {};
-    const reason = forcedClose.reason === 'max_time' || forcedClose.reason === 'max_budget'
+    const evaluatedConstraint = currentConstraintState(latestSessionJson);
+    const reason = forcedClose.active
       ? forcedClose.reason
-      : undefined;
+      : evaluatedConstraint.reason;
     const constraint = {
-      forced_close: Boolean(forcedClose.active),
+      forced_close: Boolean(forcedClose.active || evaluatedConstraint.forcedClose),
       ...(reason ? { reason } : {}),
-      voluntary_close_allowed: forcedClose.voluntary_close_allowed !== false,
+      voluntary_close_allowed: Boolean(forcedClose.active)
+        ? false
+        : evaluatedConstraint.voluntaryCloseAllowed,
     };
 
     return { ...turn, participantStatuses: combinedStatuses, responses, constraint };
@@ -576,6 +607,12 @@ export class BoardOrchestrator {
       }
     }
 
+    const updatedSessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    updatedSessionJson.total_cost = Number(updatedSessionJson.total_cost ?? 0)
+      + Object.values(memberResults).reduce((total, result) => total + (result.usage?.costDelta ?? 0), 0);
+    updatedSessionJson.updated_at = new Date().toISOString();
+    await writeFile(sessionPath, `${JSON.stringify(updatedSessionJson, null, 2)}\n`, 'utf8');
+
     return {
       runId: run.sessionId,
       outputs,
@@ -591,23 +628,77 @@ export class BoardOrchestrator {
   ): Promise<Record<string, string>> {
     const sessionPath = join(run.sessionPath, 'session.json');
     const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
-    const finalStatements: Record<string, string> = {};
+    persistForcedCloseIfReached(sessionJson);
+    const constraintState = currentConstraintState(sessionJson);
+    if (!sessionJson.forced_close?.active && !constraintState.voluntaryCloseAllowed) {
+      throw new Error(`Voluntary close is not allowed before min_time (${sessionJson.constraints?.min_time_minutes ?? 0} minutes).`);
+    }
 
     sessionJson.status = 'RUNNING';
     sessionJson.lifecycle_state = 'FINAL_CLOSING';
     sessionJson.round_state = 'FINAL_CLOSING';
     sessionJson.updated_at = new Date().toISOString();
+    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
 
-    for (const memberName of Object.keys(run.board)) {
-      const statement = finalStatementsByMember?.[memberName] ?? turn.outputs[memberName] ?? `Final position: ${memberName} remains committed to the current recommendation.`;
-      finalStatements[memberName] = statement;
+    const availableMembers = Object.keys(run.board)
+      .filter((memberName) => sessionJson.board?.[memberName]?.status !== 'UNAVAILABLE');
+    const sharedHistory = await readAcceptedConversation(run.sessionPath);
+    const finalStatementResults = await Promise.all(availableMembers.map(async (memberName) => {
+      const suppliedStatement = finalStatementsByMember?.[memberName]?.trim();
+      if (suppliedStatement) {
+        return { memberName, statement: suppliedStatement, execution: undefined };
+      }
 
+      const execution = await executeBoardMember(
+        this.clientFactory,
+        { ...this.options, autoRetry: true },
+        run,
+        memberName,
+        [
+          `Brief: ${sessionJson.brief ?? run.sessionName}`,
+          typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '',
+          '',
+          'Accepted shared conversation before final closing:',
+          sharedHistory || '(No shared deliberation messages.)',
+          '',
+          FINAL_STATEMENT_PROMPT,
+        ].join('\n'),
+      );
+      return {
+        memberName,
+        statement: execution.result.status === 'COMPLETED' ? execution.result.output?.trim() : undefined,
+        execution,
+      };
+    }));
+
+    for (const finalResult of finalStatementResults) {
+      if (finalResult.execution?.result.status === 'COMPLETED') {
+        await promoteMemberWorkspaceChanges(
+          run.sessionPath,
+          finalResult.execution.workspacePath,
+          finalResult.execution.artifactBaseline,
+        );
+      }
+    }
+
+    const contrarian = finalStatementResults.filter(({ memberName }) => memberName.toLowerCase() === 'contrarian');
+    const otherMembers = finalStatementResults.filter(({ memberName }) => memberName.toLowerCase() !== 'contrarian');
+    const finalStatements: Record<string, string> = {};
+
+    for (const { memberName, statement, execution } of [...otherMembers, ...contrarian]) {
       const tracked = sessionJson.board[memberName] ?? {};
-      tracked.status = 'COMPLETED';
-      tracked.last_output = statement;
+      tracked.status = statement ? 'COMPLETED' : 'UNAVAILABLE';
+      tracked.attempts = execution?.result.attempts ?? tracked.attempts ?? 0;
+      tracked.last_output = statement ?? null;
+      tracked.last_error = execution?.result.error ?? null;
       tracked.last_updated = new Date().toISOString();
       sessionJson.board[memberName] = tracked;
 
+      if (!statement) {
+        continue;
+      }
+
+      finalStatements[memberName] = statement;
       await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
         from: memberName,
         to: 'all',
@@ -616,6 +707,8 @@ export class BoardOrchestrator {
     }
 
     sessionJson.final_statements = finalStatements;
+    sessionJson.total_cost = Number(sessionJson.total_cost ?? 0) + finalStatementResults
+      .reduce((total, result) => total + (result.execution?.result.usage?.costDelta ?? 0), 0);
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
     return finalStatements;
   }
@@ -638,131 +731,177 @@ export class BoardOrchestrator {
   ): Promise<string> {
     let finalConclusion = conclusion ?? null;
     let memo = '';
-    let attemptCount = 0;
+    let lastFailure = 'CEO synthesis returned no accepted memo content.';
 
     const sessionPath = join(run.sessionPath, 'session.json');
     const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    persistForcedCloseIfReached(sessionJson);
+    if (!sessionJson.forced_close?.active && !currentConstraintState(sessionJson).voluntaryCloseAllowed) {
+      throw new Error(`CEO synthesis is not allowed before min_time (${sessionJson.constraints?.min_time_minutes ?? 0} minutes).`);
+    }
     sessionJson.status = 'RUNNING';
     sessionJson.lifecycle_state = 'SYNTHESIS';
     sessionJson.legacy_lifecycle_state = 'CEO_SYNTHESIS';
     sessionJson.updated_at = new Date().toISOString();
     await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
 
-    while (attemptCount < 2) {
-      attemptCount += 1;
-      if (!finalConclusion) {
-        finalConclusion = await this.synthesizeCEOConclusion(run, turn, attemptCount > 1
-          ? 'The previous CEO memo was invalid. Please rewrite it as a valid board memo that includes the required headings and a non-empty Final Decision.'
-          : undefined);
-      }
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        if (!finalConclusion) {
+          const retryPrompt = attempt === 1
+            ? undefined
+            : `The previous CEO memo attempt was not accepted. Correct these errors: ${lastFailure}`;
+          finalConclusion = await this.synthesizeCEOConclusion(run, turn, retryPrompt);
+        }
 
-      memo = [
-        '# Board Memo: CEO Decision',
-        '',
-        `- Run: ${run.sessionName}`,
-        `- Session ID: ${run.sessionId}`,
-        '',
-        '## Final Decision',
-        '',
-        finalConclusion,
-        '',
-        '## Ranked Recommendations',
-        '',
-        `1. ${finalConclusion}`,
-        '',
-        '## Decision Map',
-        '',
-        '- Board discussion resolved to a single CEO decision.',
-        '',
-        '## Board Stances',
-        '',
-        ...Object.entries(turn.outputs).map(([memberName, output]) => `### ${memberName}\n\n${output ?? 'No output recorded.'}\n`),
-        '',
-        '## Tensions & Dissent',
-        '',
-        'The board surfaced the main trade-off and dissenting position before the CEO synthesized the final recommendation.',
-        '',
-        '## Trade-offs & Risks',
-        '',
-        'The chief risks are execution risk and decision quality under uncertainty.',
-        '',
-        '## Next Actions',
-        '',
-        '1. Confirm the chosen direction with the owning team.',
-        '2. Document the specific implementation order.',
-        '',
-        '## Deliberation Summary',
-        '',
-        `The board reviewed the case and the CEO selected: ${finalConclusion}`,
-        '',
-      ].join('\n');
+        const latest = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+        const now = new Date();
+        const duration = Math.max(0, (now.getTime() - new Date(latest.created_at).getTime()) / 60_000);
+        const budgetUsed = Number(latest.total_cost ?? 0);
+        const title = 'CEO Decision';
+        const expectedMetadata = {
+          title,
+          date: now.toISOString(),
+          sessionId: run.sessionId,
+          duration,
+          budgetUsed,
+          boardMembers: Object.keys(run.board),
+          brief: String(latest.brief ?? run.sessionName),
+          transcript: join(run.sessionPath, 'conversation.jsonl'),
+        };
+        const frontmatter = YAML.stringify({
+          title: expectedMetadata.title,
+          date: expectedMetadata.date,
+          session_id: expectedMetadata.sessionId,
+          duration: expectedMetadata.duration,
+          budget_used: expectedMetadata.budgetUsed,
+          board_members: expectedMetadata.boardMembers,
+          brief: expectedMetadata.brief,
+          transcript: expectedMetadata.transcript,
+        }).trimEnd();
+        const finalStatements = latest.final_statements ?? {};
+        const boardStances = Object.keys(run.board).map((memberName) => {
+          const statement = finalStatements[memberName];
+          const fallbackStatement = turn.memberResults[memberName]?.output ?? turn.outputs[memberName];
+          const stance = typeof statement === 'string' && statement.trim()
+            ? statement
+            : latest.board?.[memberName]?.status === 'UNAVAILABLE'
+              ? 'Unavailable: no final statement was provided.'
+              : fallbackStatement ?? 'Unavailable: no accepted statement was provided.';
+          return `### ${memberName}\n\n${stance}\n`;
+        });
 
-      const validationErrors = validateMemo(memo);
-      if (validationErrors.length === 0) {
+        memo = [
+          '---',
+          frontmatter,
+          '---',
+          '',
+          `# Board Memo: ${title}`,
+          '',
+          '## Final Decision',
+          '',
+          finalConclusion ?? '',
+          '',
+          '## Ranked Recommendations',
+          '',
+          `1. ${finalConclusion ?? ''}`,
+          '',
+          '## Decision Map',
+          '',
+          '- Board discussion resolved to a single CEO decision.',
+          '',
+          '## Board Stances',
+          '',
+          ...boardStances,
+          '## Tensions & Dissent',
+          '',
+          'The board surfaced the main trade-off and dissenting position before the CEO synthesized the final recommendation.',
+          '',
+          '## Trade-offs & Risks',
+          '',
+          'The chief risks are execution risk and decision quality under uncertainty.',
+          '',
+          '## Next Actions',
+          '',
+          '1. Confirm the chosen direction with the owning team.',
+          '2. Document the specific implementation order.',
+          '',
+          '## Deliberation Summary',
+          '',
+          `The board reviewed the case and the CEO selected: ${finalConclusion ?? ''}`,
+          '',
+        ].join('\n');
+
+        const validation = validateDecisionMemo(memo, expectedMetadata);
+        if (!validation.ok) {
+          lastFailure = validation.errors.join('; ');
+          finalConclusion = null;
+          continue;
+        }
+
         await mkdir(join(run.sessionPath, 'snapshot'), { recursive: true });
         await writeFile(run.memoPath, memo, 'utf8');
 
-        const sessionPath = join(run.sessionPath, 'session.json');
-        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
-
+        const completedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
         for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
-          const tracked = sessionJson.board[memberName] ?? {};
+          const tracked = completedSession.board[memberName] ?? {};
+          if (tracked.status === 'UNAVAILABLE') {
+            continue;
+          }
           tracked.status = memberResult.healthy ? 'COMPLETED' : 'FAILED';
           tracked.attempts = memberResult.attempts ?? Number(tracked.attempts ?? 0);
           tracked.last_output = memberResult.output ?? null;
           tracked.last_error = memberResult.error ?? null;
           tracked.last_updated = new Date().toISOString();
-          sessionJson.board[memberName] = tracked;
+          completedSession.board[memberName] = tracked;
         }
 
-        sessionJson.round = Number(sessionJson.round ?? 0) + 1;
-        sessionJson.round_state = 'CEO_SYNTHESIS_COMPLETE';
-        sessionJson.status = 'READY';
-        sessionJson.lifecycle_state = 'COMPLETED';
-        sessionJson.legacy_lifecycle_state = 'CEO_SYNTHESIS';
-        sessionJson.updated_at = new Date().toISOString();
-        sessionJson.ceo_conclusion = finalConclusion;
-        sessionJson.telemetry = buildBoardTelemetry(turn);
+        completedSession.round = Number(completedSession.round ?? 0) + 1;
+        completedSession.round_state = 'CEO_SYNTHESIS_COMPLETE';
+        completedSession.status = 'COMPLETED';
+        completedSession.lifecycle_state = 'COMPLETED';
+        completedSession.legacy_lifecycle_state = 'CEO_SYNTHESIS';
+        completedSession.updated_at = new Date().toISOString();
+        completedSession.ceo_conclusion = finalConclusion;
+        completedSession.telemetry = buildBoardTelemetry(turn);
+        const endedAt = new Date();
+        const elapsedMinutes = Math.max(0, (endedAt.getTime() - new Date(completedSession.created_at).getTime()) / 60_000);
 
         await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
           from: 'CEO',
           to: 'all',
-          message: finalConclusion,
+          message: finalConclusion ?? '',
         });
         await appendJsonlRecord(join(run.sessionPath, 'conversation.jsonl'), {
           type: 'meeting_end',
-          timestamp: new Date().toISOString(),
-          elapsed_minutes: 0,
-          total_cost: 0,
-          end_reason: 'completed',
+          timestamp: endedAt.toISOString(),
+          elapsed_minutes: elapsedMinutes,
+          total_cost: Number(completedSession.total_cost ?? 0),
+          end_reason: completedSession.forced_close?.reason ? `${completedSession.forced_close.reason}_constraint` : 'completed',
         });
 
-        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+        await writeFile(sessionPath, `${JSON.stringify(completedSession, null, 2)}\n`, 'utf8');
         return memo;
+      } catch (error) {
+        lastFailure = error instanceof Error ? error.message : String(error);
+        finalConclusion = null;
       }
-
-      if (attemptCount >= 2 || !this.options.autoRetry) {
-        const sessionPath = join(run.sessionPath, 'session.json');
-        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
-
-        sessionJson.round = Number(sessionJson.round ?? 0) + 1;
-        sessionJson.round_state = 'CEO_SYNTHESIS_FAILED';
-        sessionJson.status = 'FAILED';
-        sessionJson.lifecycle_state = 'FAILED';
-        sessionJson.updated_at = new Date().toISOString();
-        sessionJson.ceo_conclusion = finalConclusion;
-        sessionJson.last_error = validationErrors.join('; ');
-        sessionJson.telemetry = buildBoardTelemetry(turn);
-
-        await writeFile(run.memoPath, memo, 'utf8');
-        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
-        throw new Error(`CEO synthesis failed memo validation: ${validationErrors.join('; ')}`);
-      }
-
-      finalConclusion = null;
     }
 
-    throw new Error('CEO memo synthesis failed unexpectedly.');
+    const failedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    failedSession.round = Number(failedSession.round ?? 0) + 1;
+    failedSession.round_state = 'CEO_SYNTHESIS_FAILED';
+    failedSession.status = 'FAILED';
+    failedSession.lifecycle_state = 'FAILED';
+    failedSession.updated_at = new Date().toISOString();
+    failedSession.ceo_conclusion = finalConclusion;
+    failedSession.last_error = lastFailure;
+    failedSession.telemetry = buildBoardTelemetry(turn);
+    if (memo) {
+      await writeFile(run.memoPath, memo, 'utf8');
+    }
+    await writeFile(sessionPath, `${JSON.stringify(failedSession, null, 2)}\n`, 'utf8');
+    throw new Error(`CEO synthesis failed after two attempts: ${lastFailure}`);
   }
 }
 

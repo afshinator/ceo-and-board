@@ -76,6 +76,9 @@ describe('pi adapter contract', () => {
         "    if (request.type === 'get_state') {",
         "      process.stdout.write(JSON.stringify({ type: 'response', id: request.id, command: request.type, success: true, data: { state: {} } }) + '\\n');",
         "    }",
+            "    if (request.type === 'get_session_stats') {",
+            "      process.stdout.write(JSON.stringify({ type: 'response', id: request.id, command: request.type, success: true, data: { totalMessages: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 } }) + '\\n');",
+            "    }",
         "  }",
         '});',
       ].join('\n'), 'utf8');
@@ -96,6 +99,7 @@ describe('pi adapter contract', () => {
             sessionDir: startConfig.sessionDir,
         });
         await client.start(startConfig);
+        await client.getSessionStats();
         await client.close();
       };
 

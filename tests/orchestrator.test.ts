@@ -269,7 +269,7 @@ describe('board orchestrator', () => {
     }
   });
 
-  it('returns current forced-close constraint state with the round result', async () => {
+  it('rejects another board round when forced close is already active', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-round-constraint-'));
 
     try {
@@ -288,13 +288,139 @@ describe('board orchestrator', () => {
           return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
         },
       });
-      const result = await orchestrator.runBoardRound(run, { to: 'Revenue', message: 'Complete this final round.' });
+      await expect(orchestrator.runBoardRound(run, { to: 'Revenue', message: 'Do not start another round.' }))
+        .rejects.toThrow(/forced close/i);
+      const closedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      expect(closedSession.forced_close).toEqual({ active: true, reason: 'max_time', voluntary_close_allowed: false });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 
-      expect(result.constraint).toEqual({
-        forced_close: true,
-        reason: 'max_time',
-        voluntary_close_allowed: false,
+  it('blocks voluntary final closing before min_time but does not use min_budget as a gate', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-min-time-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'minimum-time-review',
+        briefContent: '# Brief\n\n## Situation\nMinimum time controls voluntary close.',
+        boardMembers: ['Revenue'],
+        constraints: { min_time_minutes: 60, max_time_minutes: 120, min_budget: 1000, max_budget: 2000 },
       });
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+      const turn = await orchestrator.runBoardRound(run, { to: 'all', message: 'Analyze the acquisition case.' });
+      expect(turn.constraint.voluntary_close_allowed).toBe(false);
+
+      await expect(orchestrator.endDeliberation(run, turn)).rejects.toThrow(/min_time/i);
+      await expect(orchestrator.writeCEOConclusion(run, turn, 'Close now.')).rejects.toThrow(/min_time/i);
+
+      const sessionPath = join(run.sessionPath, 'session.json');
+      const checkpoint = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      checkpoint.created_at = new Date(Date.now() - 61 * 60 * 1000).toISOString();
+      await writeFile(sessionPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+
+      await expect(orchestrator.endDeliberation(run, turn)).resolves.toMatchObject({ Revenue: expect.any(String) });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes an active round before max-budget forced close and then only permits final closing', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-max-budget-'));
+    let promptsStarted = 0;
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'maximum-budget-review',
+        briefContent: '# Brief\n\n## Situation\nThe active round must finish.',
+        boardMembers: ['Revenue', 'Contrarian'],
+        constraints: { min_time_minutes: 0, max_time_minutes: 100, min_budget: 1_000_000, max_budget: 0.25 },
+      });
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          let statsRead = 0;
+          return new class extends ScriptedPiAgentClient {
+            async prompt(text: string) {
+              promptsStarted += 1;
+              await super.prompt(text);
+            }
+
+            async getSessionStats() {
+              statsRead += 1;
+              return {
+                ...(await super.getSessionStats()),
+                cost: statsRead === 1 ? 0 : 0.5,
+                tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, total: 15 },
+              };
+            }
+          }({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+
+      const result = await orchestrator.runBoardRound(run, { to: 'all', message: 'Finish the current round.' });
+
+      expect(promptsStarted).toBe(2);
+      expect(Object.values(result.participantStatuses)).toEqual(['COMPLETED', 'COMPLETED']);
+      expect(result.constraint).toMatchObject({ forced_close: true, reason: 'max_budget', voluntary_close_allowed: false });
+      await expect(orchestrator.runBoardRound(run, { to: 'all', message: 'Another open round.' })).rejects.toThrow(/forced close/i);
+      await expect(orchestrator.endDeliberation(run, result)).resolves.toMatchObject({
+        Revenue: expect.any(String),
+        Contrarian: expect.any(String),
+      });
+      const sessionPath = join(run.sessionPath, 'session.json');
+      const checkpoint = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      checkpoint.created_at = new Date(Date.now() - 101 * 60 * 1000).toISOString();
+      await writeFile(sessionPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+      await orchestrator.writeCEOConclusion(run, result, 'Proceed with the acquisition.');
+
+      const conversation = (await readFile(join(run.sessionPath, 'conversation.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const meetingEnd = conversation.find((record) => record.type === 'meeting_end');
+      expect(meetingEnd?.elapsed_minutes).toBeGreaterThan(100);
+      expect(meetingEnd?.total_cost).toBeGreaterThan(0.25);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('finishes an active round that crosses max_time, then forces final closing', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-max-time-crossing-'));
+    let promptsStarted = 0;
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'maximum-time-review',
+        briefContent: '# Brief\n\n## Situation\nAn active round crosses max_time.',
+        boardMembers: ['Revenue'],
+        constraints: { min_time_minutes: 0, max_time_minutes: 5, min_budget: 0, max_budget: 10_000 },
+      });
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new class extends ScriptedPiAgentClient {
+            async prompt(text: string) {
+              promptsStarted += 1;
+              const sessionPath = join(run.sessionPath, 'session.json');
+              const checkpoint = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+              checkpoint.created_at = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+              await writeFile(sessionPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+              await super.prompt(text);
+            }
+          }({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+
+      const result = await orchestrator.runBoardRound(run, { to: 'all', message: 'Finish this active round.' });
+
+      expect(promptsStarted).toBe(1);
+      expect(result.participantStatuses.Revenue).toBe('COMPLETED');
+      expect(result.constraint).toMatchObject({ forced_close: true, reason: 'max_time', voluntary_close_allowed: false });
+      await expect(orchestrator.runBoardRound(run, { to: 'all', message: 'Do not start another round.' })).rejects.toThrow(/forced close/i);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -835,6 +961,7 @@ describe('board orchestrator', () => {
       });
 
       let ceoAttempts = 0;
+      const ceoPrompts: string[] = [];
       const factory: PiAgentClientFactory = {
         async create(config) {
           if (config.agentName !== 'CEO') {
@@ -849,7 +976,7 @@ describe('board orchestrator', () => {
             agentName: config.agentName,
             piSessionId: config.sessionId,
             async start() { return; },
-            async prompt() { return; },
+            async prompt(prompt: string) { ceoPrompts.push(prompt); },
             async waitUntilSettled() { return; },
             async getLastAssistantText() {
               return ceoAttempts === 1 ? '' : 'The board should proceed with the offer.';
@@ -873,8 +1000,63 @@ describe('board orchestrator', () => {
       const memo = await new BoardOrchestrator(factory, { autoRetry: true }).writeCEOConclusion(run, turn, '');
 
       expect(ceoAttempts).toBe(2);
+      expect(ceoPrompts[1]).toMatch(/Final Decision.*non-empty/i);
       expect(memo).toContain('## Final Decision');
       expect(memo).toContain('The board should proceed with the offer.');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves accepted final statements and the partial memo when both synthesis attempts fail', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-final-memo-failure-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'memo-failure-review',
+        briefContent: '# Brief\n\n## Situation\nFinal statements survive memo failure.',
+        boardMembers: ['Revenue'],
+      });
+      const orchestrator = new BoardOrchestrator({
+        async create(config) {
+          if (config.agentName === 'CEO') {
+            return {
+              agentName: config.agentName,
+              piSessionId: config.sessionId,
+              async start() { return; },
+              async prompt() { return; },
+              async waitUntilSettled() { return; },
+              async getLastAssistantText() { return ''; },
+              async getSessionStats() {
+                return { messageCount: 1, pendingMessageCount: 0, sessionId: config.sessionId, isStreaming: false };
+              },
+              async setAutoRetry() { return; },
+              async abort() { return; },
+              onEvent() { return () => {}; },
+              isHealthy() { return true; },
+              async close() { return; },
+            };
+          }
+          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      }, { autoRetry: true });
+      const turn = await orchestrator.runBoardTurn(run, { Revenue: 'Analyze the acquisition.' });
+      const finalStatements = await orchestrator.endDeliberation(run, turn);
+
+      await expect(orchestrator.writeCEOConclusion(run, turn, '')).rejects.toThrow(/failed after two attempts/i);
+
+      const conversation = (await readFile(join(run.sessionPath, 'conversation.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const checkpoint = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+      const memo = await readFile(run.memoPath, 'utf8');
+
+      expect(finalStatements.Revenue).toBeTruthy();
+      expect(conversation.some((record) => record.from === 'Revenue' && record.message === finalStatements.Revenue)).toBe(true);
+      expect(checkpoint.lifecycle_state).toBe('FAILED');
+      expect(memo).toContain('session_id:');
+      expect(memo).toContain('## Final Decision');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -964,6 +1146,83 @@ describe('board orchestrator', () => {
       ]);
       const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
       expect(sessionJson.lifecycle_state).toBe('FINAL_CLOSING');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('executes final statements for available members, retries once, and skips unavailable members', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-final-execution-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'final-execution-review',
+        briefContent: '# Brief\n\n## Situation\nCollect real final statements.',
+        boardMembers: ['Revenue', 'Contrarian', 'Ops'],
+      });
+      const firstOrchestrator = new BoardOrchestrator({
+        async create(config) {
+          return new ScriptedPiAgentClient({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+      const turn = await firstOrchestrator.runBoardTurn(run, {
+        Revenue: 'Initial analysis.',
+        Contrarian: 'Initial challenge.',
+        Ops: 'Initial operations analysis.',
+      });
+      const sessionPath = join(run.sessionPath, 'session.json');
+      const checkpoint = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+      checkpoint.created_at = new Date(Date.now() - 61 * 60 * 1000).toISOString();
+      checkpoint.board.Ops.status = 'UNAVAILABLE';
+      await writeFile(sessionPath, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+
+      const created: string[] = [];
+      let revenueAttempts = 0;
+      let synthesisPrompt = '';
+      const closingOrchestrator = new BoardOrchestrator({
+        async create(config) {
+          if (config.agentName === 'CEO') {
+            return new class extends ScriptedPiAgentClient {
+              async prompt(text: string) {
+                synthesisPrompt = text;
+                await super.prompt(text);
+              }
+            }({ agentName: config.agentName, piSessionId: config.sessionId });
+          }
+          created.push(config.agentName);
+          return new class extends ScriptedPiAgentClient {
+            async prompt(text: string) {
+              if (config.agentName === 'Revenue') {
+                revenueAttempts += 1;
+                if (revenueAttempts === 1) {
+                  throw new Error('temporary closeout failure');
+                }
+              }
+              await super.prompt(text);
+            }
+          }({ agentName: config.agentName, piSessionId: config.sessionId });
+        },
+      });
+
+      const finalStatements = await closingOrchestrator.endDeliberation(run, turn);
+      const finalConversation = (await readFile(join(run.sessionPath, 'conversation.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((record) => record.from === 'Revenue' || record.from === 'Contrarian' || record.from === 'Ops')
+        .slice(-2);
+      const finalCheckpoint = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+      expect(revenueAttempts).toBe(2);
+      expect([...created].sort()).toEqual(['Contrarian', 'Revenue', 'Revenue']);
+      expect(finalStatements.Revenue).toBeTruthy();
+      expect(finalStatements.Contrarian).toBeTruthy();
+      expect(finalStatements.Ops).toBeUndefined();
+      expect(finalConversation.map((record) => record.from)).toEqual(['Revenue', 'Contrarian']);
+      expect(finalCheckpoint.board.Ops.status).toBe('UNAVAILABLE');
+      expect(finalCheckpoint.final_statements.Ops).toBeUndefined();
+      await closingOrchestrator.synthesizeCEOConclusion(run, turn);
+      expect(synthesisPrompt.indexOf('Contrarian:')).toBeGreaterThan(synthesisPrompt.indexOf('Revenue:'));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

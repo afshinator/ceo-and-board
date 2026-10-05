@@ -73,6 +73,9 @@ Notes:
 - Board-member and CEO turns now run behind an inactivity watchdog; Pi message and tool execution events reset the deadline, and expiry aborts the client and fails the attempt.
 - Each production `RpcPiAgentClient` now starts Pi with the configured `--session-id` and `--session-dir`; orchestrator retries recreate the subprocess with the same member session identity and storage directory.
 - Board turns now launch member executions concurrently and resolve only after the round barrier; exhausted member failures are returned as failed results without blocking available members, and only completed responses are appended to shared conversation history.
+- A7 constraint enforcement now persists configured min/max thresholds, treats min_budget as display-only, gates voluntary close and CEO synthesis on min_time, completes active rounds before activating max-time/max-budget forced close, and rejects further rounds once forced closing begins.
+- A8 final closing now executes every remaining available member concurrently, retries each once in the same session, excludes unavailable members, persists only accepted final statements before synthesis, and supplies the Contrarian statement to the CEO last.
+- A9 memo synthesis now writes YAML frontmatter from deterministic harness state, validates it with Zod, validates Markdown structure/content with remark AST parsing, retries once with concrete validator errors, and preserves final statements plus partial memo on terminal synthesis failure.
 - Board turns now launch member executions concurrently and resolve only after the round barrier; unavailable failures do not block successful participants, and only accepted outputs enter shared conversation history.
 - The run checkpoint now tracks a concrete lifecycle state through `INITIALIZING`, `DELIBERATING`, `FINAL_CLOSING`, `CEO_SYNTHESIS`, `COMPLETED`, and `FAILED`, making the runtime state machine explicit instead of implicit.
 - The runtime lifecycle is intentionally a simplified v1 model: broader conceptual v1.3 states such as `VALIDATING` and `CEO_FRAMING` are not currently represented as active persisted states in the implementation.
@@ -120,6 +123,9 @@ Notes:
 - Completed A6 round orchestration with `runBoardRound()`: supports `all`, single, and subset recipients; rejects unknown names; excludes unavailable members from execution while returning explicit statuses; waits for the slowest participant; and returns ordered semantic responses plus persisted constraint state.
 - Round prompts use a snapshot of accepted conversation history from before the round, so peers cannot see current-round responses. CEO recipient targets and accepted responses are persisted in `conversation.jsonl`, while failed responses remain excluded.
 - Added private per-member workspaces and barrier-time artifact promotion. Peers cannot see same-round artifacts; successful artifacts become available next round, failed-attempt files remain private, harness-owned files are excluded, and collisions do not overwrite shared artifacts.
+- Completed A7–A9: enforced time/budget close rules at board-round boundaries; implemented real parallel final statements with one retry, unavailable filtering, persistence-before-synthesis, and Contrarian-last synthesis context; added strict deterministic memo frontmatter/Markdown validation and one feedback-driven CEO retry.
+- Implemented A10 lifecycle control: a controller runs a supplied sequence of board rounds through final closing and validated synthesis, stops queued rounds after forced close, leaves pre-min_time deliberation open, and records unrecoverable failures in the checkpoint. The CLI run path now composes through this controller.
+- Added A10 fake-Pi lifecycle coverage for multi-round completion, forced max-budget closure, min_time continuation, transient CEO recovery, synthesis terminal failure, and stale-lock recovery.
 - The status summary now includes a compact memo preview extracted from the saved final-decision section, so the newest recommendation is visible in the run summary without opening the memo file itself.
 - Added the final-close lifecycle transition for forced-close runs, so the checkpoint can intentionally advance into `FINAL_CLOSING` before synthesis or terminal completion.
 - Added the final close-through-synthesis handoff so board final statements are persisted before the CEO memo is generated, matching the control-flow architecture around `endDeliberation()` and memo synthesis.
@@ -135,7 +141,7 @@ Notes:
 - Revisit the design if the runtime contract changes materially in a future pinned package upgrade.
 - Keep any future implementation decisions clearly marked as architecture decisions versus observed reference behavior.
 - Complete A5 verification against longer-lived real Pi processes; scripted failure/replacement and same-session subprocess startup are covered, but a full provider-backed crash/restart smoke test remains environment-dependent.
-- A7 constraints and final-close integration are the next proposal phase.
+- The controller currently consumes a supplied round-request sequence; interactive CEO tool-call integration remains part of the Pi-extension work. A11 runtime TUI/view-model and A12 opt-in provider-backed Pi smoke coverage remain.
 
 ## Decision log
 
