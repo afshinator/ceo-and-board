@@ -159,7 +159,8 @@ The [implementation-1.4](implementation-1.4.md) corrective plan is in execution.
 
 - Phase 0 complete: negative-test backlog N1–N8 written and confirmed RED (15 failing tests, 86 passing).
 - B1 complete: Vitest upgraded to 5.0.3, Zod to 4.6.5. No API breakage; the suite runs clean apart from the intended N-series failures. Pi remains 1.0.2 per the v1.4 baseline.
-- Conformance checklist status after B1: C1 pass; C2–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
+- B2 complete: the documented app entrypoint [apps/ceo/extensions/ceo-and-board.ts](../apps/ceo/extensions/ceo-and-board.ts) now composes `registerCeoBoardExtension` (commands/tools) plus the runtime widget, and the double widget registration inside [src/pi/extension.ts](../src/pi/extension.ts) is removed. N7 is green.
+- Conformance checklist status after B2: C1, C2 pass; C3–C10 pending their milestones; C12 holds for pre-Phase-0 code only (the suite is intentionally RED until fixes land).
 
 ## Decision log
 

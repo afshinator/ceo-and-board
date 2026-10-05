@@ -9,7 +9,6 @@ import { loadConfig } from '../config.js';
 import { BoardOrchestrator } from '../orchestrator.js';
 import type { PiAgentClientFactory } from '../pi.js';
 import { acquireProjectLock, createRun, type ProjectLock, type RunSession } from '../run.js';
-import { registerBoardRuntimeWidget } from '../tui/extension.js';
 
 interface ActiveDecision {
   run: RunSession;
@@ -50,7 +49,6 @@ export function registerCeoBoardExtension(
   pi: ExtensionAPI,
   options: CeoBoardExtensionOptions = {},
 ): void {
-  registerBoardRuntimeWidget(pi);
   let activeDecision: ActiveDecision | undefined;
 
   const releaseActiveDecision = async () => {
