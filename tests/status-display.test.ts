@@ -175,4 +175,25 @@ describe('runtime status display', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('includes a memo preview in the persisted run summary', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-memo-preview-'));
+
+    try {
+      const run = await createRun(projectRoot, {
+        briefName: 'memo-preview',
+        briefContent: '# Brief\n\n## Situation\nCheck preview',
+        boardMembers: ['Revenue'],
+      });
+
+      const memo = '# Board Memo\n\n## Final Decision\nProceed with the strategic pivot while preserving operational safety.\n';
+      await writeFile(run.memoPath, memo, 'utf8');
+
+      const summary = await summarizePersistedRunStatus(projectRoot, run.sessionName);
+      expect(summary.memoPreview).toContain('Proceed with the strategic pivot');
+      expect(renderBoardStatus(summary)).toContain('Proceed with the strategic pivot');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

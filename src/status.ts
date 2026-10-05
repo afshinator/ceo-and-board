@@ -19,6 +19,7 @@ export type BoardStatusSummary = {
   totalMembers: number;
   completedMembers: number;
   failedMembers: number;
+  memoPreview?: string | null;
   members: BoardMemberStatusView[];
 };
 
@@ -48,6 +49,49 @@ async function readPersistedLifecycle(run: RunSession): Promise<string> {
     return normalizeLifecycleState(lifecycle);
   } catch {
     return 'DELIBERATING';
+  }
+}
+
+function extractMemoPreview(memo: string | null): string | null {
+  if (!memo) {
+    return null;
+  }
+
+  const normalized = memo.replace(/\r/g, '');
+  const lines = normalized.split('\n');
+  let inFinalDecision = false;
+  const previewLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      if (line === '## Final Decision') {
+        inFinalDecision = true;
+        continue;
+      }
+
+      if (inFinalDecision) {
+        break;
+      }
+    }
+
+    if (inFinalDecision) {
+      const trimmed = line.trim();
+      if (trimmed) {
+        previewLines.push(trimmed);
+      }
+    }
+  }
+
+  const preview = previewLines.join(' ').replace(/\s+/g, ' ').trim();
+  return preview ? compactText(preview, 180) : compactText(normalized, 180);
+}
+
+async function readMemoPreview(run: RunSession): Promise<string | null> {
+  try {
+    const memo = await readFile(run.memoPath, 'utf8');
+    return extractMemoPreview(memo);
+  } catch {
+    return null;
   }
 }
 
@@ -86,6 +130,7 @@ export async function summarizeBoardStatus(
     totalMembers: members.length,
     completedMembers,
     failedMembers,
+    memoPreview: await readMemoPreview(run),
     members,
   };
 }
@@ -133,7 +178,14 @@ export async function listPersistedRuns(projectRoot: string): Promise<PersistedR
       }
     }
 
-    summaries.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    summaries.sort((left, right) => {
+      const timeDelta = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+      if (timeDelta !== 0) {
+        return timeDelta;
+      }
+
+      return right.sessionName.localeCompare(left.sessionName);
+    });
     return summaries;
   } catch {
     return [];
@@ -216,11 +268,22 @@ export async function summarizePersistedRunStatus(
     }),
   );
 
-  return summarizeBoardStatus(run, {
+  const status = await summarizeBoardStatus(run, {
     runId: sessionJson.session_id,
     outputs,
     memberResults,
   });
+
+  if (status.memoPreview) {
+    return { ...status, memoPreview: status.memoPreview };
+  }
+
+  try {
+    const memo = await readFile(run.memoPath, 'utf8');
+    return { ...status, memoPreview: extractMemoPreview(memo) };
+  } catch {
+    return status;
+  }
 }
 
 export function renderBoardStatus(status: BoardStatusSummary): string {
@@ -229,6 +292,10 @@ export function renderBoardStatus(status: BoardStatusSummary): string {
     `Run: ${status.runName} (${status.runId})`,
     `Members: ${status.completedMembers}/${status.totalMembers} completed`,
   ];
+
+  if (status.memoPreview) {
+    parts.push(`Memo preview: ${status.memoPreview}`);
+  }
 
   for (const member of status.members) {
     const output = member.latestOutput ? ` — ${member.latestOutput}` : '';
