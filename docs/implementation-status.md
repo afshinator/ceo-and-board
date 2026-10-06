@@ -192,3 +192,6 @@ F15 is closed by decision, not directory re-org: the flat `src/` layout is accep
 
 ### D11
 F16 is closed without a duplicate fixture tree. Recovered/reconstructed agent fixtures are canonical in `.pi/ceo-agents/` (already loaded by six test files); invalid fixtures stay inline (single-use). The one real defect was that `synthetic-context` lived in the runtime briefs dir and would have appeared as a selectable brief at `/ceo-begin`; it is moved to `tests/fixtures/briefs/synthetic-context/` and covered by a discovery test.
+
+### D12
+F17 closed: `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile` + `pnpm check` on push/PR. Single job, Node 22 + pnpm 10, no matrix, no credentials. The A12 real-Pi smoke stays skipped in CI (`CEO_BOARD_REAL_PI_SMOKE` unset).
