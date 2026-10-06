@@ -6,7 +6,7 @@ import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWo
 import { evaluateMeetingConstraints } from './constraints.js';
 import { REQUIRED_SECTION_HEADINGS, validateDecisionMemo } from './memo-validator.js';
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentEvent, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
-import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, type RunSession } from './run.js';
+import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, readRunCheckpoint, writeRunCheckpoint, type RunSession } from './run.js';
 import { FINAL_STATEMENT_PROMPT, renderAgentPrompt } from './prompt-renderer.js';
 import { loadAgentDefinition } from './agents.js';
 
@@ -459,7 +459,7 @@ export class BoardOrchestrator {
     if (ceoPath) {
       try {
         const agent = await loadAgentDefinition(ceoPath);
-        const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+        const sessionJson = await readRunCheckpoint(run);
         const constraints = sessionJson.constraints ?? {};
         return renderAgentPrompt(agent, {
           sessionId: run.sessionId,
@@ -487,7 +487,7 @@ export class BoardOrchestrator {
     turn: BoardTurnResult,
     prompt?: string,
   ): Promise<string> {
-    const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+    const sessionJson = await readRunCheckpoint(run);
     const finalStatements = sessionJson.final_statements ?? {};
     const boardMembers = Object.keys(run.board);
     const synthesisOrder = [
@@ -553,11 +553,10 @@ export class BoardOrchestrator {
       await toolUseRecorder.flush();
 
       if (synthesisCostDelta !== 0) {
-        const sessionPath = join(run.sessionPath, 'session.json');
-        const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+        const sessionJson = await readRunCheckpoint(run);
         sessionJson.total_cost = Number(sessionJson.total_cost ?? 0) + synthesisCostDelta;
         sessionJson.updated_at = new Date().toISOString();
-        await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+        await writeRunCheckpoint(run, sessionJson);
       }
 
       const conclusion = await client.getLastAssistantText();
@@ -598,11 +597,10 @@ export class BoardOrchestrator {
       }
     }
 
-    const sessionPath = join(run.sessionPath, 'session.json');
-    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const sessionJson = await readRunCheckpoint(run);
     persistForcedCloseIfReached(sessionJson);
     if (sessionJson.forced_close?.active) {
-      await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+      await writeRunCheckpoint(run, sessionJson);
       throw new Error(`A forced close is active (${sessionJson.forced_close.reason}); no further board round is allowed.`);
     }
     const priorConversation = await readAcceptedConversation(run.sessionPath);
@@ -621,7 +619,7 @@ export class BoardOrchestrator {
     sessionJson.lifecycle_state = 'DELIBERATING';
     sessionJson.round_state = 'IN_PROGRESS';
     sessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, sessionJson);
     const promptsByMember = Object.fromEntries(availableMembers.map((memberName) => [
       memberName,
       [
@@ -660,7 +658,7 @@ export class BoardOrchestrator {
       };
     }
 
-    const latestSessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const latestSessionJson = await readRunCheckpoint(run);
     latestSessionJson.board = sessionJson.board;
     latestSessionJson.round = Number(latestSessionJson.round ?? 0) + 1;
     latestSessionJson.round_state = 'IDLE';
@@ -669,7 +667,7 @@ export class BoardOrchestrator {
       latestSessionJson.round_state = 'IDLE';
     }
     latestSessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(latestSessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, latestSessionJson);
 
     const responses: BoardRoundResult['responses'] = requestedMembers.map((memberName) => {
       const status: 'completed' | 'unavailable' = combinedStatuses[memberName] === 'COMPLETED' ? 'completed' : 'unavailable';
@@ -705,12 +703,11 @@ export class BoardOrchestrator {
       }
     }
 
-    const sessionPath = join(run.sessionPath, 'session.json');
-    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const sessionJson = await readRunCheckpoint(run);
     sessionJson.status = 'RUNNING';
     sessionJson.lifecycle_state = 'DELIBERATING';
     sessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, sessionJson);
     await captureRunSnapshot(run, { promptsByMember });
 
     const executions = await Promise.all(memberNames.map((memberName) => executeBoardMember(
@@ -745,11 +742,11 @@ export class BoardOrchestrator {
       }
     }
 
-    const updatedSessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const updatedSessionJson = await readRunCheckpoint(run);
     updatedSessionJson.total_cost = Number(updatedSessionJson.total_cost ?? 0)
       + Object.values(memberResults).reduce((total, result) => total + (result.usage?.costDelta ?? 0), 0);
     updatedSessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(updatedSessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, updatedSessionJson);
 
     return {
       runId: run.sessionId,
@@ -764,8 +761,7 @@ export class BoardOrchestrator {
     turn: BoardTurnResult,
     finalStatementsByMember?: Record<string, string>,
   ): Promise<Record<string, string>> {
-    const sessionPath = join(run.sessionPath, 'session.json');
-    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const sessionJson = await readRunCheckpoint(run);
     persistForcedCloseIfReached(sessionJson);
     const constraintState = currentConstraintState(sessionJson);
     if (!sessionJson.forced_close?.active && !constraintState.voluntaryCloseAllowed) {
@@ -776,7 +772,7 @@ export class BoardOrchestrator {
     sessionJson.lifecycle_state = 'FINAL_CLOSING';
     sessionJson.round_state = 'FINAL_CLOSING';
     sessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, sessionJson);
 
     const availableMembers = Object.keys(run.board)
       .filter((memberName) => sessionJson.board?.[memberName]?.status !== 'UNAVAILABLE');
@@ -848,7 +844,7 @@ export class BoardOrchestrator {
     sessionJson.final_statements = finalStatements;
     sessionJson.total_cost = Number(sessionJson.total_cost ?? 0) + finalStatementResults
       .reduce((total, result) => total + (result.execution?.result.usage?.costDelta ?? 0), 0);
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, sessionJson);
     return finalStatements;
   }
 
@@ -874,8 +870,7 @@ export class BoardOrchestrator {
     let memo = '';
     let lastFailure = 'CEO synthesis returned no accepted memo content.';
 
-    const sessionPath = join(run.sessionPath, 'session.json');
-    const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const sessionJson = await readRunCheckpoint(run);
     persistForcedCloseIfReached(sessionJson);
     if (!sessionJson.forced_close?.active && !currentConstraintState(sessionJson).voluntaryCloseAllowed) {
       throw new Error(`CEO synthesis is not allowed before min_time (${sessionJson.constraints?.min_time_minutes ?? 0} minutes).`);
@@ -884,7 +879,7 @@ export class BoardOrchestrator {
     sessionJson.lifecycle_state = 'SYNTHESIS';
     sessionJson.legacy_lifecycle_state = 'CEO_SYNTHESIS';
     sessionJson.updated_at = new Date().toISOString();
-    await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, sessionJson);
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
@@ -896,7 +891,7 @@ export class BoardOrchestrator {
           decisionText = extractFinalDecision(memoBody);
         }
 
-        const latest = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+        const latest = await readRunCheckpoint(run);
         const now = new Date();
         const duration = Math.max(0, (now.getTime() - new Date(latest.created_at).getTime()) / 60_000);
         const budgetUsed = Number(latest.total_cost ?? 0);
@@ -958,7 +953,7 @@ export class BoardOrchestrator {
         await mkdir(join(run.sessionPath, 'snapshot'), { recursive: true });
         await writeFile(run.memoPath, memo, 'utf8');
 
-        const completedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+        const completedSession = await readRunCheckpoint(run);
         for (const [memberName, memberResult] of Object.entries(turn.memberResults)) {
           const tracked = completedSession.board[memberName] ?? {};
           if (tracked.status === 'UNAVAILABLE') {
@@ -996,7 +991,7 @@ export class BoardOrchestrator {
           end_reason: completedSession.forced_close?.reason ? `${completedSession.forced_close.reason}_constraint` : 'completed',
         });
 
-        await writeFile(sessionPath, `${JSON.stringify(completedSession, null, 2)}\n`, 'utf8');
+        await writeRunCheckpoint(run, completedSession);
         return memo;
       } catch (error) {
         lastFailure = error instanceof Error ? error.message : String(error);
@@ -1005,7 +1000,7 @@ export class BoardOrchestrator {
       }
     }
 
-    const failedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+    const failedSession = await readRunCheckpoint(run);
     failedSession.round = Number(failedSession.round ?? 0) + 1;
     failedSession.round_state = 'CEO_SYNTHESIS_FAILED';
     failedSession.status = 'FAILED';
@@ -1017,7 +1012,7 @@ export class BoardOrchestrator {
     if (memo) {
       await writeFile(run.memoPath, memo, 'utf8');
     }
-    await writeFile(sessionPath, `${JSON.stringify(failedSession, null, 2)}\n`, 'utf8');
+    await writeRunCheckpoint(run, failedSession);
     throw new Error(`CEO synthesis failed after two attempts: ${lastFailure}`);
   }
 }

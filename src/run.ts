@@ -169,6 +169,14 @@ export async function appendJsonlRecord(filePath: string, record: Record<string,
   await appendFile(filePath, `${JSON.stringify(record)}\n`, 'utf8');
 }
 
+export async function readRunCheckpoint(run: RunSession): Promise<Record<string, any>> {
+  return JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+}
+
+export async function writeRunCheckpoint(run: RunSession, checkpoint: Record<string, any>): Promise<void> {
+  await writeFile(join(run.sessionPath, 'session.json'), `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+}
+
 export async function createRun(
   projectRoot: string,
   options: CreateRunOptions,
@@ -278,7 +286,7 @@ export async function captureRunSnapshot(
   await mkdir(promptDir, { recursive: true });
   await mkdir(agentDir, { recursive: true });
 
-  const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+  const sessionJson = await readRunCheckpoint(run);
   const briefContent = options.briefContent ?? (typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '');
 
   if (briefContent) {
@@ -441,21 +449,19 @@ export class InactivityWatchdog {
 }
 
 export async function markCeoFraming(run: RunSession): Promise<void> {
-  const sessionPath = join(run.sessionPath, 'session.json');
-  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+  const sessionJson = await readRunCheckpoint(run);
 
   sessionJson.lifecycle_state = 'CEO_FRAMING';
   sessionJson.updated_at = new Date().toISOString();
 
-  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+  await writeRunCheckpoint(run, sessionJson);
 }
 
 export async function markForcedClose(
   run: RunSession,
   reason: ForcedCloseReason,
 ): Promise<void> {
-  const sessionPath = join(run.sessionPath, 'session.json');
-  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+  const sessionJson = await readRunCheckpoint(run);
 
   sessionJson.lifecycle_state = 'FINAL_CLOSING';
   sessionJson.round_state = 'FORCED_CLOSE_PENDING';
@@ -467,15 +473,14 @@ export async function markForcedClose(
   };
   sessionJson.updated_at = new Date().toISOString();
 
-  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+  await writeRunCheckpoint(run, sessionJson);
 }
 
 export async function finalizeForcedClose(
   run: RunSession,
   reason: ForcedCloseReason,
 ): Promise<void> {
-  const sessionPath = join(run.sessionPath, 'session.json');
-  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+  const sessionJson = await readRunCheckpoint(run);
 
   sessionJson.status = 'READY';
   sessionJson.lifecycle_state = 'FINAL_CLOSING';
@@ -488,7 +493,7 @@ export async function finalizeForcedClose(
   };
   sessionJson.updated_at = new Date().toISOString();
 
-  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
+  await writeRunCheckpoint(run, sessionJson);
 }
 
 export async function acquireProjectLock(

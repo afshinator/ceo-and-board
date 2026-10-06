@@ -186,3 +186,6 @@ The next implementation step is runtime polish and richer board execution semant
 
 ### D5
 The current implementation intentionally uses a simplified runtime lifecycle model instead of the broader conceptual v1.3 state names. The code is the source of truth for the active state machine until the design is intentionally widened again.
+
+### D10
+F15 is closed by decision, not directory re-org: the flat `src/` layout is accepted for v1. The §3 proposed module tree is a proposal, not a requirement, and moving 5k lines across 30 files for zero behavior change is churn. The one real duplication the monoliths caused - checkpoint read/write (`JSON.parse(readFile(join(...)))` + `writeFile(join(...), JSON.stringify(...))` repeated ~12 times) - is consolidated into `readRunCheckpoint`/`writeRunCheckpoint` in `run.ts`, and all orchestrator/run mutation sites now use them.
