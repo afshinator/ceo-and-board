@@ -161,7 +161,8 @@ describe('run/session lifecycle', () => {
       const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
       expect(sessionJson.forced_close.active).toBe(true);
       expect(sessionJson.forced_close.reason).toBe('max_time');
-      expect(sessionJson.round_state).toBe('FORCED_CLOSE_PENDING');
+      expect(sessionJson.lifecycle_state).toBe('FINAL_CLOSING');
+      expect(sessionJson.round_state).toBe('IDLE');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -210,7 +211,7 @@ describe('run/session lifecycle', () => {
       expect(sessionJson.forced_close.active).toBe(true);
       expect(sessionJson.forced_close.reason).toBe('max_budget');
       expect(sessionJson.lifecycle_state).toBe('FINAL_CLOSING');
-      expect(sessionJson.round_state).toBe('FINAL_CLOSING');
+      expect(sessionJson.round_state).toBe('IDLE');
       expect(sessionJson.final_close_reason).toBe('max_budget');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });

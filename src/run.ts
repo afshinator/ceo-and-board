@@ -158,7 +158,6 @@ async function recoverInterruptedRun(projectRoot: string, sessionName: string | 
   await discardIncompleteJsonlTail(join(sessionPath, 'tool-use.jsonl'));
   sessionJson.status = 'FAILED';
   sessionJson.lifecycle_state = 'FAILED';
-  sessionJson.round_state = 'FAILED';
   sessionJson.failure_reason = 'interrupted';
   sessionJson.updated_at = new Date().toISOString();
   await writeJsonAtomically(sessionFile, sessionJson);
@@ -464,7 +463,6 @@ export async function markForcedClose(
   const sessionJson = await readRunCheckpoint(run);
 
   sessionJson.lifecycle_state = 'FINAL_CLOSING';
-  sessionJson.round_state = 'FORCED_CLOSE_PENDING';
   sessionJson.final_close_reason = reason;
   sessionJson.forced_close = {
     active: true,
@@ -484,7 +482,6 @@ export async function finalizeForcedClose(
 
   sessionJson.status = 'READY';
   sessionJson.lifecycle_state = 'FINAL_CLOSING';
-  sessionJson.round_state = 'FINAL_CLOSING';
   sessionJson.final_close_reason = reason;
   sessionJson.forced_close = {
     active: true,

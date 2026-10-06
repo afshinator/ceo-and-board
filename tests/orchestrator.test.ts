@@ -1517,7 +1517,7 @@ describe('board orchestrator', () => {
 
       const sessionJson = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8'));
       expect(sessionJson.lifecycle_state).toBe('COMPLETED');
-      expect(sessionJson.round_state).toBe('CEO_SYNTHESIS_COMPLETE');
+      expect(sessionJson.round_state).toBe('IDLE');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

@@ -145,7 +145,6 @@ function persistForcedCloseIfReached(sessionJson: Record<string, any>): void {
     };
     sessionJson.final_close_reason = state.reason;
     sessionJson.lifecycle_state = 'FINAL_CLOSING';
-    sessionJson.round_state = 'FORCED_CLOSE_PENDING';
   }
 }
 
@@ -770,7 +769,6 @@ export class BoardOrchestrator {
 
     sessionJson.status = 'RUNNING';
     sessionJson.lifecycle_state = 'FINAL_CLOSING';
-    sessionJson.round_state = 'FINAL_CLOSING';
     sessionJson.updated_at = new Date().toISOString();
     await writeRunCheckpoint(run, sessionJson);
 
@@ -968,7 +966,6 @@ export class BoardOrchestrator {
         }
 
         completedSession.round = Number(completedSession.round ?? 0) + 1;
-        completedSession.round_state = 'CEO_SYNTHESIS_COMPLETE';
         completedSession.status = 'COMPLETED';
         completedSession.lifecycle_state = 'COMPLETED';
         completedSession.legacy_lifecycle_state = 'CEO_SYNTHESIS';
@@ -1002,7 +999,6 @@ export class BoardOrchestrator {
 
     const failedSession = await readRunCheckpoint(run);
     failedSession.round = Number(failedSession.round ?? 0) + 1;
-    failedSession.round_state = 'CEO_SYNTHESIS_FAILED';
     failedSession.status = 'FAILED';
     failedSession.lifecycle_state = 'FAILED';
     failedSession.updated_at = new Date().toISOString();

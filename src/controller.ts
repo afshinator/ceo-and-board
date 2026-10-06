@@ -73,9 +73,6 @@ export async function runBoardLifecycle(
         if (sessionJson.lifecycle_state !== 'COMPLETED' && sessionJson.lifecycle_state !== 'FAILED') {
           sessionJson.status = 'FAILED';
           sessionJson.lifecycle_state = 'FAILED';
-          sessionJson.round_state = sessionJson.round_state === 'CEO_SYNTHESIS_FAILED'
-            ? 'CEO_SYNTHESIS_FAILED'
-            : 'FAILED';
           sessionJson.failure_reason = message;
           sessionJson.updated_at = new Date().toISOString();
           await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');

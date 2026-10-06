@@ -162,7 +162,7 @@ describe('board lifecycle controller', () => {
       const checkpoint = JSON.parse(await readFile(join(run.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
 
       expect(checkpoint.lifecycle_state).toBe('FAILED');
-      expect(checkpoint.round_state).toBe('CEO_SYNTHESIS_FAILED');
+      expect(checkpoint.round_state).toBe('IDLE');
       expect(checkpoint.final_statements.Revenue).toBeTruthy();
       expect(await readFile(run.memoPath, 'utf8')).toContain('session_id:');
     } finally {
