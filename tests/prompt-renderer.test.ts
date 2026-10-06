@@ -16,7 +16,7 @@ describe('prompt renderer (implementation-1.4 N4)', () => {
       'Constraints: {{MIN_TIME}} {{MAX_TIME}} {{MIN_BUDGET}} {{MAX_BUDGET}}',
     ].join('\n'),
     sourcePath: 'expertise/ceo.md',
-    provenance: { frontmatter: 'recovered', body: 'recovered' },
+    provenance: { frontmatter: 'recovered', sections: {} },
   };
 
   const runtime = {

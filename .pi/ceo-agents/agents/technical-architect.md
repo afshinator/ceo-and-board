@@ -9,6 +9,11 @@ skills:
     use-when: "Generate SVGs to support your architecture arguments - system diagrams, integration paths, scalability ceilings, or migration maps. Max 2 uses per meeting. Save one for your final statement to make your position visually compelling."
 model: anthropic/claude-sonnet-4-6
 domain: []
+provenance:
+  frontmatter: reconstructed
+  sections:
+    Purpose: reconstructed
+    Variables: reconstructed
 ---
 
 # Technical Architect / Feasibility & Systems Operator

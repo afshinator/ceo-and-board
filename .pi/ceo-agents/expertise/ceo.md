@@ -11,6 +11,14 @@ skills:
     use-when: "After the memo is fully written, use this to speak a 1-4 sentence summary of the final decision. Be concise, professional, and straightforward - state the problem and the solution the board reached. Save the audio file alongside the memo AND play it aloud immediately (use Workflow 3: TTS+TTF - save then afplay). Use a 2m bash timeout so you don't cut off your own speech."
 model: anthropic/claude-opus-4-6
 domain: []
+provenance:
+  frontmatter: recovered
+  sections:
+    Purpose: recovered
+    Variables: recovered
+    Instructions: unrecovered
+    Workflow: unrecovered
+    Context: harness-generated
 ---
 
 # CEO / Chief Decider

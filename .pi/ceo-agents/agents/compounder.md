@@ -9,6 +9,11 @@ skills:
     use-when: "Generate SVGs to visually support your arguments - trade-off diagrams, decision matrices, risk maps, or framework visualizations. Max 2 uses per meeting. Save one for your final statement to make your position visually compelling."
 model: anthropic/claude-sonnet-4-6
 domain: []
+provenance:
+  frontmatter: recovered
+  sections:
+    Purpose: recovered
+    Variables: partially-recovered
 ---
 
 # Compounder / Retention & Longevity Operator

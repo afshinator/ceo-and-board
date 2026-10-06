@@ -14,10 +14,20 @@ export const SkillEntrySchema = z.object({
   'use-when': z.string().optional(),
 });
 
+export const PROVENANCE_STATUSES = ['recovered', 'partially-recovered', 'reconstructed', 'unrecovered', 'harness-generated'] as const;
+export type ProvenanceStatus = typeof PROVENANCE_STATUSES[number];
+
 export interface PromptProvenance {
-  frontmatter: 'recovered' | 'reconstructed' | 'invalid';
-  body: 'recovered' | 'partially-recovered' | 'reconstructed';
+  frontmatter: ProvenanceStatus;
+  sections: Record<string, ProvenanceStatus>;
 }
+
+const ProvenanceStatusSchema = z.enum(PROVENANCE_STATUSES);
+
+const PromptProvenanceSchema = z.object({
+  frontmatter: ProvenanceStatusSchema,
+  sections: z.record(z.string(), ProvenanceStatusSchema).optional().default({}),
+});
 
 export const AgentFrontmatterSchema = z.object({
   name: z.string(),
@@ -25,6 +35,7 @@ export const AgentFrontmatterSchema = z.object({
   skills: z.array(SkillEntrySchema).optional(),
   model: z.string().min(1, 'Agent definitions must declare a model.'),
   domain: z.array(z.string()).optional(),
+  provenance: PromptProvenanceSchema.optional(),
 });
 
 export type AgentFrontmatter = z.infer<typeof AgentFrontmatterSchema>;
@@ -51,11 +62,13 @@ export async function loadAgentDefinition(filePath: string): Promise<AgentDefini
     throw new Error(`Agent frontmatter for ${filePath} is empty or invalid.`);
   }
 
+  const frontmatter = AgentFrontmatterSchema.parse(parsed);
+
   return {
-    frontmatter: AgentFrontmatterSchema.parse(parsed),
+    frontmatter,
     body: body ?? '',
     sourcePath: filePath,
-    provenance: { frontmatter: 'recovered', body: 'recovered' },
+    provenance: frontmatter.provenance ?? { frontmatter: 'reconstructed', sections: {} },
   };
 }
 

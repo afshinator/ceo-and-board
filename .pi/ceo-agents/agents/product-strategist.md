@@ -9,6 +9,11 @@ skills:
     use-when: "Generate SVGs to support your product arguments - positioning maps, roadmap timelines, feature-priority matrices, or customer-journey diagrams. Max 2 uses per meeting. Save one for your final statement to make your position visually compelling."
 model: anthropic/claude-sonnet-4-6
 domain: []
+provenance:
+  frontmatter: reconstructed
+  sections:
+    Purpose: reconstructed
+    Variables: reconstructed
 ---
 
 # Product Strategist / Positioning & Roadmap Operator

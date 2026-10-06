@@ -143,11 +143,66 @@ describe('agent definition negatives (implementation-1.4 N2)', () => {
 
   it('exposes prompt provenance for the recovered CEO source', async () => {
     const agentPath = decodeURIComponent(
-      new URL('../sample implementation/expertise/ceo.md', import.meta.url).pathname,
+      new URL('../.pi/ceo-agents/expertise/ceo.md', import.meta.url).pathname,
     );
     const agent = await loadAgentDefinition(agentPath);
 
-    expect(agent.provenance).toMatchObject({ frontmatter: 'recovered' });
+    expect(agent.provenance.frontmatter).toBe('recovered');
+    expect(agent.provenance.sections).toMatchObject({
+      Purpose: 'recovered',
+      Variables: 'recovered',
+      Instructions: 'unrecovered',
+      Workflow: 'unrecovered',
+      Context: 'harness-generated',
+    });
+  });
+
+  it('marks Compounder variables partially recovered (implementation-1.5 F13)', async () => {
+    const agentPath = decodeURIComponent(
+      new URL('../.pi/ceo-agents/agents/compounder.md', import.meta.url).pathname,
+    );
+    const agent = await loadAgentDefinition(agentPath);
+
+    expect(agent.provenance.frontmatter).toBe('recovered');
+    expect(agent.provenance.sections).toMatchObject({
+      Purpose: 'recovered',
+      Variables: 'partially-recovered',
+    });
+  });
+
+  it('marks Revenue partially recovered from transcript evidence (implementation-1.5 F13)', async () => {
+    const agentPath = decodeURIComponent(
+      new URL('../.pi/ceo-agents/agents/revenue.md', import.meta.url).pathname,
+    );
+    const agent = await loadAgentDefinition(agentPath);
+
+    expect(agent.provenance.frontmatter).toBe('reconstructed');
+    expect(agent.provenance.sections).toMatchObject({
+      Purpose: 'partially-recovered',
+      Variables: 'partially-recovered',
+    });
+  });
+
+  it('marks reconstructed board members reconstructed and defaults missing provenance (implementation-1.5 F13)', async () => {
+    const strategistPath = decodeURIComponent(
+      new URL('../.pi/ceo-agents/agents/product-strategist.md', import.meta.url).pathname,
+    );
+    const strategist = await loadAgentDefinition(strategistPath);
+    expect(strategist.provenance.frontmatter).toBe('reconstructed');
+    expect(strategist.provenance.sections).toMatchObject({
+      Purpose: 'reconstructed',
+      Variables: 'reconstructed',
+    });
+
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ceo-board-agent-no-provenance-'));
+    try {
+      const barePath = join(projectRoot, 'agent.md');
+      await writeFile(barePath, '---\nname: bare\nmodel: test/model\n---\n\nBody.\n', 'utf8');
+      const bare = await loadAgentDefinition(barePath);
+      expect(bare.provenance).toEqual({ frontmatter: 'reconstructed', sections: {} });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 
