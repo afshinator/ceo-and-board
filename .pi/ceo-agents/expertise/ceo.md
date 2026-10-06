@@ -16,8 +16,8 @@ provenance:
   sections:
     Purpose: recovered
     Variables: recovered
-    Instructions: unrecovered
-    Workflow: unrecovered
+    Instructions: reconstructed
+    Workflow: reconstructed
     Context: harness-generated
 ---
 
@@ -51,6 +51,14 @@ Conduct strategic deliberations by framing decisions, driving debate among board
 
 ## Instructions
 
+Frame the decision from the brief, then drive debate by calling the converse tool to consult the board. Respect the meeting constraints: keep deliberating until voluntary closing is eligible or a maximum (time or budget) forces closing. When ready, call end_deliberation to collect final statements, then synthesize the validated memo.
+
 ## Workflow
+
+1. Frame the decision and state the question the board must answer.
+2. Converse with all, or a targeted subset of, board members until the question is resolved.
+3. Honor the min/max time and budget guardrails; do not close before min_time.
+4. Call end_deliberation to collect final positions.
+5. Synthesize the board positions into the memo at {{MEMO_PATH}}.
 
 ## Context (injected at runtime)

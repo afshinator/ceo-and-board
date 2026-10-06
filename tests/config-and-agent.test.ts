@@ -151,10 +151,12 @@ describe('agent definition negatives (implementation-1.4 N2)', () => {
     expect(agent.provenance.sections).toMatchObject({
       Purpose: 'recovered',
       Variables: 'recovered',
-      Instructions: 'unrecovered',
-      Workflow: 'unrecovered',
+      Instructions: 'reconstructed',
+      Workflow: 'reconstructed',
       Context: 'harness-generated',
     });
+    expect(agent.body).toMatch(/## Instructions\n\s*\S/);
+    expect(agent.body).toMatch(/## Workflow\n\s*\S/);
   });
 
   it('marks Compounder variables partially recovered (implementation-1.5 F13)', async () => {
