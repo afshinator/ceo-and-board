@@ -189,3 +189,6 @@ The current implementation intentionally uses a simplified runtime lifecycle mod
 
 ### D10
 F15 is closed by decision, not directory re-org: the flat `src/` layout is accepted for v1. The §3 proposed module tree is a proposal, not a requirement, and moving 5k lines across 30 files for zero behavior change is churn. The one real duplication the monoliths caused - checkpoint read/write (`JSON.parse(readFile(join(...)))` + `writeFile(join(...), JSON.stringify(...))` repeated ~12 times) - is consolidated into `readRunCheckpoint`/`writeRunCheckpoint` in `run.ts`, and all orchestrator/run mutation sites now use them.
+
+### D11
+F16 is closed without a duplicate fixture tree. Recovered/reconstructed agent fixtures are canonical in `.pi/ceo-agents/` (already loaded by six test files); invalid fixtures stay inline (single-use). The one real defect was that `synthetic-context` lived in the runtime briefs dir and would have appeared as a selectable brief at `/ceo-begin`; it is moved to `tests/fixtures/briefs/synthetic-context/` and covered by a discovery test.

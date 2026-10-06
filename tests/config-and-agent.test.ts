@@ -264,4 +264,16 @@ describe('brief validation negatives (implementation-1.4 N3)', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('discovers the synthetic-context fixture with its sibling files (implementation-1.5 F16)', async () => {
+    const briefsDir = decodeURIComponent(
+      new URL('../tests/fixtures/briefs', import.meta.url).pathname,
+    );
+    const discovered = await discoverBriefs(briefsDir);
+    const synthetic = discovered.find((brief) => brief.name === 'synthetic-context');
+
+    expect(synthetic).toBeDefined();
+    expect(synthetic!.supportingFiles).toEqual(expect.arrayContaining(['context-a.md', 'context-b.txt']));
+    expect(validateBrief(await readFile(synthetic!.path, 'utf8'), requiredSections).ok).toBe(true);
+  });
 });
