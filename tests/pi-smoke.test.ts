@@ -101,4 +101,65 @@ describe.skipIf(!runRealPiSmoke)('real Pi RPC smoke', () => {
       await rm(root, { recursive: true, force: true });
     }
   }, 300_000);
+
+  it('runs two board members through concurrent rounds, session reuse, and final closing', async () => {
+    if (!smokeModel) {
+      throw new Error('Set CEO_BOARD_PI_MODEL to a Pi-supported configured model before running the opt-in Pi smoke.');
+    }
+
+    const root = await mkdtemp(join(tmpdir(), 'ceo-board-real-pi-multi-smoke-'));
+    const run = await createRun(root, {
+      briefName: 'multi-member-smoke',
+      briefContent: '# Multi-member smoke\n\n## Situation\nVerify two board members run concurrently in private sessions.\n\n## Stakes\nArchitecture correctness.\n\n## Constraints\nTwo members, two rounds.\n\n## Key Question\nDo both members complete independently?',
+      boardMembers: ['Revenue', 'Contrarian'],
+    });
+    const clients = new Map<string, RpcPiAgentClient>();
+    const sessionIds = new Set<string>();
+    const orchestrator = new BoardOrchestrator({
+      async create(config) {
+        const client = new RpcPiAgentClient({
+          agentName: config.agentName,
+          piSessionId: config.sessionId,
+          cwd: config.cwd,
+          sessionDir: config.sessionDir,
+          model: smokeModel,
+        });
+        clients.set(config.agentName, client);
+        sessionIds.add(config.sessionId);
+        return client;
+      },
+    }, { cwd: root, autoRetry: true, inactivityTimeoutMs: 300_000 });
+
+    try {
+      const first = await orchestrator.runBoardRound(run, {
+        to: 'all',
+        message: 'Provide an initial recommendation on the brief.',
+      });
+      expect(first.participantStatuses.Revenue).toBe('COMPLETED');
+      expect(first.participantStatuses.Contrarian).toBe('COMPLETED');
+      expect(sessionIds.has(`${run.sessionId}.revenue`)).toBe(true);
+      expect(sessionIds.has(`${run.sessionId}.contrarian`)).toBe(true);
+
+      const revenueBefore = await clients.get('Revenue')?.getSessionStats();
+      const second = await orchestrator.runBoardRound(run, {
+        to: 'all',
+        message: 'Address the strongest disagreement from the first round.',
+      });
+      expect(second.participantStatuses.Revenue).toBe('COMPLETED');
+      expect(second.participantStatuses.Contrarian).toBe('COMPLETED');
+      const revenueAfter = await clients.get('Revenue')?.getSessionStats();
+      expect(revenueAfter!.messageCount).toBeGreaterThan(revenueBefore!.messageCount);
+
+      const finalStatements = await orchestrator.endDeliberation(run, second);
+      expect(finalStatements.Revenue).toBeTruthy();
+      expect(finalStatements.Contrarian).toBeTruthy();
+      const memo = await orchestrator.writeCEOConclusion(run, second);
+      expect(memo).toContain('## Final Decision');
+      expect(sessionIds.has(`${run.sessionId}.ceo`)).toBe(true);
+      await orchestrator.closeRun(run);
+    } finally {
+      await orchestrator.closeRun(run);
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 300_000);
 });

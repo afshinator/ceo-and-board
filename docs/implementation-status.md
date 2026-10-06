@@ -198,3 +198,6 @@ F17 closed: `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile` + `
 
 ### D13
 F18 closed. `sessionId` keeps the UUID suffix (collision safety in the same millisecond) and is accepted as a deliberate deviation from the literal §8.1 string. `round_state` is aligned back to the spec's `IDLE`/`IN_PROGRESS` round-barrier semantics; the lifecycle-phase values (`FORCED_CLOSE_PENDING`, `FINAL_CLOSING`, `CEO_SYNTHESIS_COMPLETE`, `CEO_SYNTHESIS_FAILED`, `FAILED`) are removed and carried only by `lifecycle_state`.
+
+### D14
+O1 is addressed as an opt-in smoke test, not production code: the harness already executes members concurrently with per-member private sessions. Added a multi-member real-Pi smoke (`tests/pi-smoke.test.ts`): two members through two rounds, per-member session identity, session reuse across rounds, final closing for both, and CEO synthesis. Remains env-gated (`CEO_BOARD_REAL_PI_SMOKE=1` + `CEO_BOARD_PI_MODEL`), skipped in CI, not run here without a configured model.
