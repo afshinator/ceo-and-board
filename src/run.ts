@@ -76,7 +76,7 @@ export interface RunSession {
   ceoAgentPath?: string;
 }
 
-function slugify(value: string): string {
+export function slugify(value: string): string {
   return value
     .trim()
     .toLowerCase()

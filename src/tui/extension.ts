@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 import { listPersistedRuns } from '../status.js';
+import { toFiniteNumber } from '../constraints.js';
 import type { BoardRuntimeActivity, BoardRuntimeInput } from './state.js';
 import { mountBoardRuntimeWidget, type MountedBoardRuntimeWidget, type RuntimeWidgetUI } from './runtime-widget.js';
 
@@ -30,19 +31,6 @@ async function readOptional(filePath: string): Promise<string> {
   }
 }
 
-function numericValue(value: unknown, fallback: number): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const amount = Number(value.trim().replace(/^\$/, '').replaceAll(',', ''));
-    if (Number.isFinite(amount)) {
-      return amount;
-    }
-  }
-  return fallback;
-}
-
 function activityKind(toolName: string): BoardRuntimeActivity['kind'] {
   if (toolName === 'write' || toolName === 'edit') {
     return 'file';
@@ -61,15 +49,15 @@ export async function loadLatestBoardRuntimeInput(projectRoot: string, now = Dat
   const toolUse = parseJsonl(await readOptional(join(latestRun.sessionPath, 'tool-use.jsonl')));
   const elapsedMinutes = Math.max(0, (now - new Date(sessionJson.created_at).getTime()) / 60_000);
   const constraints = sessionJson.constraints ?? {};
-  const maxTimeMinutes = numericValue(constraints.max_time_minutes, 1);
-  const maxBudget = numericValue(constraints.max_budget, 1);
-  const minTimeMinutes = numericValue(constraints.min_time_minutes, 0);
-  const minBudget = numericValue(constraints.min_budget, 0);
+  const maxTimeMinutes = toFiniteNumber(constraints.max_time_minutes, 1);
+  const maxBudget = toFiniteNumber(constraints.max_budget, 1);
+  const minTimeMinutes = toFiniteNumber(constraints.min_time_minutes, 0);
+  const minBudget = toFiniteNumber(constraints.min_budget, 0);
 
   return {
     lifecycleState: typeof sessionJson.lifecycle_state === 'string' ? sessionJson.lifecycle_state : 'INITIALIZING',
     elapsedMinutes,
-    totalCost: numericValue(sessionJson.total_cost, 0),
+    totalCost: toFiniteNumber(sessionJson.total_cost, 0),
     constraints: { minTimeMinutes, maxTimeMinutes, minBudget, maxBudget },
     members: Object.entries(sessionJson.board ?? {}).map(([name, state]: [string, any]) => {
       const activities = toolUse

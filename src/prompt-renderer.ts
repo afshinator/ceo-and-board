@@ -1,18 +1,5 @@
 import type { AgentDefinition } from './agents.js';
 
-export interface ResolvedExpertise {
-  path: string;
-  useWhen?: string;
-  updatable?: boolean;
-  content?: string;
-}
-
-export interface ResolvedSkill {
-  path: string;
-  useWhen?: string;
-  content?: string;
-}
-
 export interface PromptRuntimeContext {
   sessionId: string;
   briefContent: string;
@@ -22,10 +9,6 @@ export interface PromptRuntimeContext {
   maxTime: number;
   minBudget: number;
   maxBudget: number;
-  supportingFiles: string[];
-  conversationPath: string;
-  expertise: ResolvedExpertise[];
-  skills: ResolvedSkill[];
 }
 
 const KNOWN_VARIABLES: Record<string, (runtime: PromptRuntimeContext) => string> = {

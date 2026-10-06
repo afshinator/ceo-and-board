@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig, CeoBoardConfigSchema, resolveAgentPath } from '../src/config.js';
 import { extractRuntimeVariables, loadAgentDefinition } from '../src/agents.js';
 import { discoverBriefs, validateBrief } from '../src/briefs.js';
+import { toFiniteNumber } from '../src/constraints.js';
 
 describe('config and agent preflight', () => {
   it('loads the canonical project config and resolves board agent paths', async () => {
@@ -70,6 +71,17 @@ describe('config and agent preflight', () => {
 
     expect(validation.ok).toBe(true);
     expect(validation.errors).toEqual([]);
+  });
+});
+
+describe('numeric coercion (implementation-1.5 audit)', () => {
+  it('coerces numbers and currency strings and falls back on invalid input', () => {
+    expect(toFiniteNumber(5, 0)).toBe(5);
+    expect(toFiniteNumber('$12.50', 0)).toBe(12.5);
+    expect(toFiniteNumber('1,250', 0)).toBe(1250);
+    expect(toFiniteNumber('nope', 7)).toBe(7);
+    expect(toFiniteNumber(undefined, 7)).toBe(7);
+    expect(toFiniteNumber(Number.NaN, 7)).toBe(7);
   });
 });
 

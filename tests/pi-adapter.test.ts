@@ -23,7 +23,6 @@ describe('pi adapter contract', () => {
       sessionId: 'session-demo-1',
       sessionDir: '/tmp/ceo-board-demo',
       cwd: process.cwd(),
-      autoRetry: false,
     });
 
     await client.prompt('Analyze the acquisition case.');
@@ -47,7 +46,6 @@ describe('pi adapter contract', () => {
       sessionId: 'session-demo-2',
       sessionDir: '/tmp/ceo-board-demo',
       cwd: process.cwd(),
-      autoRetry: false,
     });
 
     await client.prompt('We should take the lower-risk path.');
@@ -88,7 +86,6 @@ describe('pi adapter contract', () => {
         sessionId: 'run-session.member-revenue',
         sessionDir: join(projectRoot, 'pi-sessions', 'revenue'),
         cwd: projectRoot,
-        autoRetry: false,
       };
       const startReplacement = async () => {
         const client = new RpcPiAgentClient({

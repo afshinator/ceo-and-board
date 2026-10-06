@@ -29,6 +29,24 @@ export function parseBudgetAmount(value: number | string): number {
   return amount;
 }
 
+export function toFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/^\$/, '').replaceAll(',', '');
+    if (normalized !== '') {
+      const amount = Number(normalized);
+      if (Number.isFinite(amount)) {
+        return amount;
+      }
+    }
+  }
+
+  return fallback;
+}
+
 export function evaluateMeetingConstraints(input: {
   createdAt: string;
   constraints: MeetingConstraintValues;

@@ -4,6 +4,7 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 
 import { parseBudgetAmount } from './constraints.js';
+import { extractNodeText } from './markdown.js';
 
 interface MarkdownNode {
   type: string;
@@ -49,18 +50,6 @@ export const REQUIRED_SECTION_HEADINGS = [
   'Next Actions',
   'Deliberation Summary',
 ];
-
-function extractNodeText(node: unknown): string {
-  if (!node || typeof node !== 'object') {
-    return '';
-  }
-
-  const value = node as MarkdownNode;
-  if (typeof value.value === 'string') {
-    return value.value;
-  }
-  return Array.isArray(value.children) ? value.children.map(extractNodeText).join('') : '';
-}
 
 function splitMemo(markdown: string): { frontmatter: string | null; body: string } {
   const normalized = markdown.replace(/\r\n/g, '\n');

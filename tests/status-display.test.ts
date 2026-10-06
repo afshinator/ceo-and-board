@@ -204,6 +204,7 @@ describe('runtime status display', () => {
         failedMembers: 1,
       });
       expect(renderPersistedRunList(runs)).toContain(run.sessionName);
+      expect(renderPersistedRunList([])).toBe('- No persisted board runs found.');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

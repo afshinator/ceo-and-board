@@ -8,6 +8,7 @@ import { discoverBriefs, validateBrief } from '../briefs.js';
 import { findConfigFile, loadConfig, resolveAgentPath } from '../config.js';
 import { loadAgentDefinition } from '../agents.js';
 import { renderAgentPrompt } from '../prompt-renderer.js';
+import { toFiniteNumber } from '../constraints.js';
 import { BoardOrchestrator } from '../orchestrator.js';
 import type { PiAgentClientFactory } from '../pi.js';
 import { acquireProjectLock, createRun, markCeoFraming, type ProjectLock, type RunSession } from '../run.js';
@@ -142,7 +143,6 @@ export function registerCeoBoardExtension(
           await markCeoFraming(run);
 
           const constraints = config.meeting.constraints;
-          const numeric = (value: unknown) => Number.parseFloat(String(value)) || 0;
           let framingBody: string;
           if (run.ceoAgentPath) {
             try {
@@ -154,12 +154,8 @@ export function registerCeoBoardExtension(
                 memoPath: run.memoPath,
                 minTime: constraints.min_time_minutes,
                 maxTime: constraints.max_time_minutes,
-                minBudget: numeric(constraints.min_budget),
-                maxBudget: numeric(constraints.max_budget),
-                supportingFiles: brief.supportingFiles,
-                conversationPath: join(run.sessionPath, 'conversation.jsonl'),
-                expertise: [],
-                skills: [],
+                minBudget: toFiniteNumber(constraints.min_budget, 0),
+                maxBudget: toFiniteNumber(constraints.max_budget, 0),
               });
             } catch {
               framingBody = '';

@@ -1,13 +1,14 @@
 import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
 import { BoardOrchestrator } from './orchestrator.js';
 import { runBoardLifecycle } from './controller.js';
 import { type PiAgentClientFactory } from './pi.js';
 import { acquireProjectLock, createRun, type RunSession } from './run.js';
 import { loadConfig, resolveRunPaths } from './config.js';
-import { exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, summarizePersistedRunStatus } from './status.js';
+import { exportPersistedRunSnapshot, listPersistedRuns, readPersistedMemo, renderBoardStatus, renderPersistedRunList, summarizePersistedRunStatus } from './status.js';
 
 export interface RunBoardFromBriefOptions {
   briefName: string;
@@ -100,81 +101,39 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
     json: false,
   };
 
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      'project-root': { type: 'string' },
+      'brief-name': { type: 'string' },
+      'brief-file': { type: 'string' },
+      member: { type: 'string', multiple: true },
+      'round-message': { type: 'string', multiple: true },
+      'session-name': { type: 'string' },
+      status: { type: 'boolean' },
+      list: { type: 'boolean' },
+      memo: { type: 'boolean' },
+      'show-memo': { type: 'boolean' },
+      export: { type: 'boolean' },
+      'export-dir': { type: 'string' },
+      json: { type: 'boolean' },
+      'no-auto-retry': { type: 'boolean' },
+    },
+  });
 
-    if (token === '--project-root') {
-      options.projectRoot = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--brief-name') {
-      options.briefName = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--brief-file') {
-      options.briefPath = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--member') {
-      options.boardMembers = [...(options.boardMembers ?? []), argv[index + 1]];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--round-message') {
-      options.roundMessages = [...(options.roundMessages ?? []), argv[index + 1] ?? ''];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--session-name') {
-      options.sessionName = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--status') {
-      options.status = true;
-      continue;
-    }
-
-    if (token === '--list') {
-      options.list = true;
-      continue;
-    }
-
-    if (token === '--memo' || token === '--show-memo') {
-      options.memo = true;
-      continue;
-    }
-
-    if (token === '--export') {
-      options.export = true;
-      continue;
-    }
-
-    if (token === '--export-dir') {
-      options.exportDir = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token === '--json') {
-      options.json = true;
-      continue;
-    }
-
-    if (token === '--no-auto-retry') {
-      options.autoRetry = false;
-      continue;
-    }
-  }
+  options.projectRoot = values['project-root'] ?? options.projectRoot;
+  options.briefName = values['brief-name'];
+  options.briefPath = values['brief-file'];
+  options.boardMembers = values.member ?? [];
+  options.roundMessages = values['round-message'];
+  options.sessionName = values['session-name'];
+  options.status = values.status ?? false;
+  options.list = values.list ?? false;
+  options.memo = values.memo === true || values['show-memo'] === true;
+  options.export = values.export ?? false;
+  options.exportDir = values['export-dir'];
+  options.json = values.json ?? false;
+  options.autoRetry = !(values['no-auto-retry'] ?? false);
 
   if (options.list) {
     const runs = await listPersistedRuns(options.projectRoot ?? process.cwd());
@@ -186,14 +145,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<Boar
       return normalizedRuns;
     }
 
-    const lines = runs.length > 0
-      ? runs.map((run) => `- ${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete${run.failedMembers > 0 ? ` | ${run.failedMembers} failed` : ''}`)
-      : ['- No persisted board runs found.'];
-
+    const rendered = renderPersistedRunList(runs);
     console.log('Persisted runs:');
-    for (const line of lines) {
-      console.log(line);
-    }
+    console.log(rendered);
 
     return normalizedRuns;
   }

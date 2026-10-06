@@ -3,10 +3,10 @@ import { join } from 'node:path';
 
 import YAML from 'yaml';
 import { prepareMemberWorkspace, promoteMemberWorkspaceChanges, snapshotMemberWorkspace, type ArtifactSnapshot } from './artifacts/visibility.js';
-import { evaluateMeetingConstraints } from './constraints.js';
+import { evaluateMeetingConstraints, toFiniteNumber } from './constraints.js';
 import { REQUIRED_SECTION_HEADINGS, validateDecisionMemo } from './memo-validator.js';
 import { RpcPiAgentClient, ScriptedPiAgentClient, type PiAgentClient, type PiAgentClientFactory, type PiAgentEvent, type PiAgentStartConfig, type PiSessionStats } from './pi.js';
-import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, readRunCheckpoint, writeRunCheckpoint, type RunSession } from './run.js';
+import { appendJsonlRecord, captureRunSnapshot, InactivityWatchdog, readRunCheckpoint, slugify, writeRunCheckpoint, type RunSession } from './run.js';
 import { FINAL_STATEMENT_PROMPT, renderAgentPrompt } from './prompt-renderer.js';
 import { loadAgentDefinition } from './agents.js';
 
@@ -272,7 +272,6 @@ async function executeBoardMember(
     sessionId,
     sessionDir,
     cwd: workspacePath,
-    autoRetry: false,
     ...(run.boardModels[memberName] ? { model: run.boardModels[memberName] } : {}),
   };
   const maxAttempts = options.autoRetry ? 2 : 1;
@@ -363,14 +362,6 @@ interface ExecutedBoardMember {
   result: BoardTurnMemberResult;
   workspacePath: string;
   artifactBaseline: ArtifactSnapshot;
-}
-
-function slugify(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'member';
 }
 
 export function buildBoardTelemetry(turn: BoardTurnResult): Record<string, BoardMemberTelemetry> {
@@ -465,14 +456,10 @@ export class BoardOrchestrator {
           briefContent: typeof sessionJson.brief_content === 'string' ? sessionJson.brief_content : '',
           boardMembers: Object.keys(run.board),
           memoPath: run.memoPath,
-          minTime: Number(constraints.min_time_minutes ?? 0),
-          maxTime: Number(constraints.max_time_minutes ?? 0),
-          minBudget: Number.parseFloat(String(constraints.min_budget ?? 0)) || 0,
-          maxBudget: Number.parseFloat(String(constraints.max_budget ?? 0)) || 0,
-          supportingFiles: [],
-          conversationPath: join(run.sessionPath, 'conversation.jsonl'),
-          expertise: [],
-          skills: [],
+          minTime: toFiniteNumber(constraints.min_time_minutes, 0),
+          maxTime: toFiniteNumber(constraints.max_time_minutes, 0),
+          minBudget: toFiniteNumber(constraints.min_budget, 0),
+          maxBudget: toFiniteNumber(constraints.max_budget, 0),
         });
       } catch {
         // Fall back to the minimal framing when no CEO definition is available.
@@ -524,7 +511,6 @@ export class BoardOrchestrator {
       sessionId: `${run.sessionId}.ceo`,
       sessionDir: join(run.sessionPath, 'pi-sessions', 'ceo'),
       cwd: this.options.cwd ?? process.cwd(),
-      autoRetry: false,
       ...(run.ceoModel ? { model: run.ceoModel } : {}),
     };
 

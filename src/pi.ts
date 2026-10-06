@@ -11,7 +11,6 @@ export interface PiAgentStartConfig {
   sessionId: string;
   sessionDir: string;
   cwd: string;
-  autoRetry: boolean;
   model?: string;
 }
 

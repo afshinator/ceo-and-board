@@ -86,16 +86,9 @@ const MEMBER_PRESENTATION: Record<string, string> = {
   UNAVAILABLE: 'unavailable',
 };
 
-function progressPercent(value: number, maximum: number): number {
+function percent(value: number, maximum: number): number {
   if (maximum <= 0) {
     return value > 0 ? 100 : 0;
-  }
-  return Math.min(100, Math.max(0, value / maximum * 100));
-}
-
-function markerPercent(value: number, maximum: number): number {
-  if (maximum <= 0) {
-    return 0;
   }
   return Math.min(100, Math.max(0, value / maximum * 100));
 }
@@ -143,15 +136,15 @@ export function buildBoardRuntimeViewModel(input: BoardRuntimeInput): BoardRunti
     time: {
       value: input.elapsedMinutes,
       maximum: maxTime,
-      progressPercent: progressPercent(input.elapsedMinutes, maxTime),
-      minimumMarkerPercent: markerPercent(input.constraints.minTimeMinutes, maxTime),
+      progressPercent: percent(input.elapsedMinutes, maxTime),
+      minimumMarkerPercent: percent(input.constraints.minTimeMinutes, maxTime),
       displayValue: `${input.elapsedMinutes.toFixed(1)} / ${maxTime.toFixed(1)} min`,
     },
     budget: {
       value: input.totalCost,
       maximum: maxBudget,
-      progressPercent: progressPercent(input.totalCost, maxBudget),
-      minimumMarkerPercent: markerPercent(input.constraints.minBudget, maxBudget),
+      progressPercent: percent(input.totalCost, maxBudget),
+      minimumMarkerPercent: percent(input.constraints.minBudget, maxBudget),
       displayValue: `$${input.totalCost.toFixed(2)} / $${maxBudget.toFixed(2)}`,
     },
   };

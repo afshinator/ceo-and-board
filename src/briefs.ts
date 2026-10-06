@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 
+import { extractNodeText } from './markdown.js';
+
 export interface BriefSectionConfig {
   section: string;
   description?: string;
@@ -20,22 +22,6 @@ export interface BriefDescriptor {
   supportingFiles: string[];
 }
 
-function extractHeadingText(node: any): string {
-  if (!node || typeof node !== 'object') {
-    return '';
-  }
-
-  if (node.type === 'text' || node.type === 'inlineCode') {
-    return node.value ?? '';
-  }
-
-  if (Array.isArray(node.children)) {
-    return node.children.map(extractHeadingText).join('');
-  }
-
-  return '';
-}
-
 function getMarkdownHeadings(markdown: string): string[] {
   const tree = unified().use(remarkParse).parse(markdown) as any;
   const headings: string[] = [];
@@ -46,7 +32,7 @@ function getMarkdownHeadings(markdown: string): string[] {
     }
 
     if (node.type === 'heading') {
-      const text = extractHeadingText(node).trim();
+      const text = extractNodeText(node).trim();
       if (text) {
         headings.push(text);
       }

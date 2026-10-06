@@ -151,11 +151,11 @@ export type PersistedRunSummary = {
 
 export function renderPersistedRunList(runs: PersistedRunSummary[]): string {
   if (runs.length === 0) {
-    return 'No persisted board runs found.';
+    return '- No persisted board runs found.';
   }
 
   return runs.map((run) => {
-    const summary = `${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete`;
+    const summary = `- ${run.sessionName} | ${run.lifecycle} | ${run.completedMembers}/${run.memberCount} complete`;
     return run.failedMembers > 0 ? `${summary} | ${run.failedMembers} failed` : summary;
   }).join('\n');
 }

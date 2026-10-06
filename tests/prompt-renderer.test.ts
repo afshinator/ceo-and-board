@@ -28,10 +28,6 @@ describe('prompt renderer (implementation-1.4 N4)', () => {
     maxTime: 3,
     minBudget: 1,
     maxBudget: 5,
-    supportingFiles: [],
-    conversationPath: '/tmp/run/conversation.jsonl',
-    expertise: [],
-    skills: [],
   };
 
   it('substitutes every known CEO runtime variable', async () => {
