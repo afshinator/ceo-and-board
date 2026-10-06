@@ -67,7 +67,6 @@ export interface BoardRuntimeViewModel {
 
 const WORKFLOW_PRESENTATION: Record<string, { label: string; tone: WorkflowPresentationTone }> = {
   INITIALIZING: { label: 'initializing', tone: 'active' },
-  VALIDATING: { label: 'validating', tone: 'active' },
   CEO_FRAMING: { label: 'framing', tone: 'active' },
   DELIBERATING: { label: 'deliberating', tone: 'active' },
   FINAL_CLOSING: { label: 'closing', tone: 'closing' },

@@ -38,7 +38,6 @@ export type ForcedCloseReason = 'max_time' | 'max_budget';
 
 export type RunLifecycleState =
   | 'INITIALIZING'
-  | 'VALIDATING'
   | 'CEO_FRAMING'
   | 'DELIBERATING'
   | 'FINAL_CLOSING'
@@ -51,7 +50,6 @@ export function normalizeLifecycleState(value: string | null | undefined): RunLi
   switch (value) {
     case 'CEO_SYNTHESIS':
       return 'SYNTHESIS';
-    case 'VALIDATING':
     case 'CEO_FRAMING':
     case 'INITIALIZING':
     case 'DELIBERATING':
@@ -440,6 +438,16 @@ export class InactivityWatchdog {
       this.onExpire?.();
     }, this.timeoutMs);
   }
+}
+
+export async function markCeoFraming(run: RunSession): Promise<void> {
+  const sessionPath = join(run.sessionPath, 'session.json');
+  const sessionJson = JSON.parse(await readFile(sessionPath, 'utf8')) as Record<string, any>;
+
+  sessionJson.lifecycle_state = 'CEO_FRAMING';
+  sessionJson.updated_at = new Date().toISOString();
+
+  await writeFile(sessionPath, `${JSON.stringify(sessionJson, null, 2)}\n`, 'utf8');
 }
 
 export async function markForcedClose(

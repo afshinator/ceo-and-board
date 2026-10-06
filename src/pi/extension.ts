@@ -10,7 +10,7 @@ import { loadAgentDefinition } from '../agents.js';
 import { renderAgentPrompt } from '../prompt-renderer.js';
 import { BoardOrchestrator } from '../orchestrator.js';
 import type { PiAgentClientFactory } from '../pi.js';
-import { acquireProjectLock, createRun, type ProjectLock, type RunSession } from '../run.js';
+import { acquireProjectLock, createRun, markCeoFraming, type ProjectLock, type RunSession } from '../run.js';
 
 interface ActiveDecision {
   run: RunSession;
@@ -139,6 +139,7 @@ export function registerCeoBoardExtension(
           }
           const orchestrator = new BoardOrchestrator(options.clientFactory, { autoRetry: true, cwd: projectRoot });
           activeDecision = { run, lock, orchestrator };
+          await markCeoFraming(run);
 
           const constraints = config.meeting.constraints;
           const numeric = (value: unknown) => Number.parseFloat(String(value)) || 0;

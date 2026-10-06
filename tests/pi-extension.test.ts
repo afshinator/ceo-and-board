@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { registerCeoBoardExtension } from '../src/pi/extension.js';
 import { ScriptedPiAgentClient } from '../src/pi.js';
+import { listPersistedRuns } from '../src/status.js';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 describe('Pi CEO–Board extension', () => {
@@ -100,6 +101,9 @@ describe('Pi CEO–Board extension', () => {
       };
 
       await commands.get('ceo-begin')?.handler('acquisition', context);
+      const runAfterBegin = (await listPersistedRuns(projectRoot))[0];
+      const checkpointAfterBegin = JSON.parse(await readFile(join(runAfterBegin.sessionPath, 'session.json'), 'utf8')) as Record<string, any>;
+      expect(checkpointAfterBegin.lifecycle_state).toBe('CEO_FRAMING');
   expect(userMessages[0]).toContain('Review the complete brief');
   expect(userMessages[0]).toContain('## Situation');
       expect(notifications.some((message) => message.includes('run started'))).toBe(true);

@@ -136,6 +136,7 @@ describe('run/session lifecycle', () => {
       expect(finalSession.ceo_conclusion).toBe('The board should proceed with the offer.');
       expect(normalizeLifecycleState('CEO_SYNTHESIS')).toBe('SYNTHESIS');
       expect(normalizeLifecycleState('SYNTHESIS')).toBe('SYNTHESIS');
+      expect(normalizeLifecycleState('VALIDATING')).toBe('INITIALIZING');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
